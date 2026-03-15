@@ -38,6 +38,8 @@ jobs:
 
           sed -i "s/${old}/${new}/g" .env.example docker-compose.yaml
 
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -b "$branch"
           git add .env.example docker-compose.yaml
           git commit -m "chore: bump tempo image to ${new}"
