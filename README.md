@@ -14,8 +14,8 @@ A local [Tempo](https://tempo.xyz) consensus development network with full obser
 git clone https://github.com/alessandrolomanto/tempo-monitor.git
 cd tempo-monitor
 cp .env.example .env
-just up          # consensus only
-just up-all      # consensus + monitoring
+just up          # consensus + monitoring
+just up-consensus      # consensus only
 ```
 
 See the full docs running `just docs` for local DNS setup, chain interaction guide, and dashboard reference.

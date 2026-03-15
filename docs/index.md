@@ -15,11 +15,11 @@ git clone https://github.com/alessandrolomanto/tempo-monitor.git
 cd tempo-monitor
 cp .env.example .env
 
-# Consensus only (validators + RPCs + faucet + Traefik)
+# Everything including observability (Grafana, Prometheus, Loki, Tempo, Pyroscope)
 just up
 
-# Everything including observability (Grafana, Prometheus, Loki, Tempo, Pyroscope)
-just up-all
+# Consensus only (validators + RPCs + faucet + Traefik)
+just up-consensus
 ```
 
 ## Verify it works
@@ -49,8 +49,8 @@ With [local DNS](local-dns.md) configured you can also use `http://rpc.tempo.loc
 
 | Command | Description |
 |---|---|
-| `just up` | Start consensus network |
-| `just up-all` | Start consensus + monitoring |
+| `just up` | Start consensus network + monitoring |
+| `just up-consensus` | Start consensus network |
 | `just down` | Stop all services |
 | `just down-v` | Stop all services and volumes |
 | `just logs [service]` | Tail logs (default: `validator-0`) |

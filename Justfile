@@ -2,13 +2,13 @@ set dotenv-load
 
 tempo_repo := env("TEMPO_REPO", "../tempo")
 
-# Start consensus network (validators + RPCs + Traefik), no monitoring
+# Start everything: consensus network + full observability stack
 up:
-    docker compose --profile consensus up -d
+    docker compose --profile consensus --profile monitoring up -d
 
 # Start everything: consensus network + full observability stack
-up-all:
-    docker compose --profile consensus --profile monitoring up -d
+up-consensus:
+    docker compose --profile consensus up -d
 
 up-restart:
     docker compose --profile consensus --profile monitoring up -d --force-recreate
