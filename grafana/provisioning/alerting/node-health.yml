@@ -1,0 +1,214 @@
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: node-health
+    folder: Tempo Alerts
+    interval: 10s
+    rules:
+      - uid: tempo-node-peer-count-low
+        title: NodePeerCountLow
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              editorMode: code
+              expr: reth_network_connected_peers{job="tempo-execution"}
+              instant: true
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              expression: A
+              reducer: last
+              refId: B
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: lt
+                    params: [5]
+              refId: C
+        noDataState: NoData
+        execErrState: Error
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Peer count below threshold (< 5)
+          description: >-
+            The node has fewer than 5 connected peers for more than 5 minutes.
+            Block propagation and transaction gossip may be degraded.
+
+      # ── Block height stalled ────────────────────────────────────────────
+      - uid: tempo-node-not-syncing
+        title: NodeNotSyncing
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 300, to: 0 }
+            datasourceUid: prometheus
+            model:
+              editorMode: code
+              expr: changes(reth_sync_checkpoint{job="tempo-execution", stage="Finish"}[2m])
+              instant: true
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              expression: A
+              reducer: last
+              refId: B
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: lt
+                    params: [1]
+              refId: C
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 0s
+        labels:
+          severity: critical
+        annotations:
+          summary: Block height stalled
+          description: >-
+            The Finish checkpoint has not advanced in the last 2 minutes.
+            The node may have lost consensus connectivity or the block
+            production pipeline is stuck.
+
+      # ── RPC latency too high ────────────────────────────────────────────
+      - uid: tempo-rpc-latency-high
+        title: RPCLatencyHigh
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              editorMode: code
+              expr: histogram_quantile(0.99, sum by (le) (rate(reth_rpc_server_calls_time_seconds_bucket{job="tempo-execution", method="eth_blockNumber"}[5m])))
+              instant: true
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              expression: A
+              reducer: last
+              refId: B
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0.5]
+              refId: C
+        noDataState: NoData
+        execErrState: Error
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: RPC p99 latency for eth_blockNumber exceeds 500ms
+          description: >-
+            High RPC latency indicates the node is under heavy load
+            or the state trie is contended.
+
+      # ── Metrics endpoint unreachable ────────────────────────────────────
+      - uid: tempo-metrics-unreachable
+        title: MetricsUnreachable
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              editorMode: code
+              expr: up{job=~"tempo-.*"}
+              instant: true
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              expression: A
+              reducer: last
+              refId: B
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: lt
+                    params: [1]
+              refId: C
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: Metrics endpoint unreachable
+          description: >-
+            Alloy cannot scrape the node. The process may have crashed
+            or the metrics port is blocked.
+
+      # ── Memory usage too high ───────────────────────────────────────────
+      - uid: tempo-high-memory
+        title: HighMemoryUsage
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              editorMode: code
+              expr: reth_jemalloc_resident{job="tempo-execution"}
+              instant: true
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              expression: A
+              reducer: last
+              refId: B
+          # 3.4e9 bytes ≈ 85% of 4 GiB — adjust to match your host
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [3400000000]
+              refId: C
+        noDataState: NoData
+        execErrState: Error
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Node memory usage is high (jemalloc resident > 3.4 GiB)
+          description: >-
+            jemalloc resident memory has exceeded 85% of the assumed 4 GiB
+            limit for over 10 minutes. Consider increasing resources or
+            investigating memory growth via Pyroscope.

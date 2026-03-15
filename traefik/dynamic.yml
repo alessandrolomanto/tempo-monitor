@@ -1,0 +1,31 @@
+http:
+  routers:
+    rpc:
+      entryPoints: [rpc]
+      rule: "Host(`rpc.tempo.local`)"
+      service: rpc
+      priority: 20
+
+    faucet:
+      entryPoints: [rpc]
+      rule: "Host(`faucet.tempo.local`)"
+      service: faucet
+      priority: 20
+
+    catchall:
+      entryPoints: [rpc]
+      rule: "PathPrefix(`/`)"
+      service: rpc
+      priority: 1
+
+  services:
+    rpc:
+      loadBalancer:
+        servers:
+          - url: "http://tempo-rpc-0:8545"
+          - url: "http://tempo-rpc-1:8545"
+
+    faucet:
+      loadBalancer:
+        servers:
+          - url: "http://tempo-faucet:8545"

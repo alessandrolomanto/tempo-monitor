@@ -1,0 +1,18 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: tempo-monitor
+  title: Tempo Monitor
+  description: Local Tempo consensus network with full observability — 4 validators, 2 RPC followers, faucet, Traefik, Grafana/Prometheus/Loki/Tempo/Pyroscope.
+  annotations:
+    backstage.io/techdocs-ref: dir:.
+    github.com/project-slug: alessandrolomanto/tempo-monitor
+  tags:
+    - blockchain
+    - tempo
+    - observability
+    - docker-compose
+spec:
+  type: service
+  lifecycle: development
+  owner: alessandrolomanto

@@ -1,0 +1,428 @@
+# ── Shared validator defaults ────────────────────────────────────────
+x-validator: &validator-defaults
+  image: ${DOCKER_IMAGE:-ghcr.io/tempoxyz/tempo:1.4.2}
+  init: true
+  restart: unless-stopped
+  profiles: [consensus]
+  environment:
+    RUST_LOG: ${RUST_LOG:-debug}
+  command:
+    - node
+    - --chain
+    - /tmp/genesis.json
+    - --datadir
+    - /tmp/data
+    - --port
+    - "30303"
+    - --http
+    - --http.addr
+    - "0.0.0.0"
+    - --http.port
+    - "8545"
+    - --http.api
+    - all
+    - --metrics
+    - "0.0.0.0:9001"
+    - --consensus.signing-key
+    - /tmp/signing-key
+    - --consensus.signing-share
+    - /tmp/signing-share
+    - --consensus.listen-address
+    - "0.0.0.0:8000"
+    - --consensus.metrics-address
+    - "0.0.0.0:8001"
+    - --consensus.datadir
+    - /tmp/consensus
+    - --consensus.fee-recipient
+    - "0x0000000000000000000000000000000000000000"
+    - --consensus.allow-private-ips
+    - --consensus.bypass-ip-check
+    - --consensus.allow-dns
+    - --consensus.wait-for-peer-response
+    - "1000ms"
+    - --consensus.wait-for-notarizations
+    - "1000ms"
+    - --consensus.wait-for-proposal
+    - "1000ms"
+    - --consensus.time-to-build-proposal
+    - "100ms"
+    - --consensus.wait-to-rebroadcast-nullify
+    - "3s"
+    - --consensus.time-to-build-subblock
+    - "100ms"
+    - --logs-otlp=http://alloy:4318/v1/logs
+    - --logs-otlp.filter=${LOG_LEVEL:-info,reth=debug}
+    - --tracing-otlp=http://alloy:4318/v1/traces
+    - --tracing-otlp.filter=${LOG_LEVEL:-info,reth=debug}
+    - --tracing-otlp.sample-ratio=${TRACE_SAMPLE_RATIO:-1.0}
+  labels:
+    - "pyroscope.agent.enabled=true"
+    - "pyroscope.exporter=eBPF"
+
+# ── Shared RPC follower defaults ─────────────────────────────────────
+x-rpc: &rpc-defaults
+  image: ${DOCKER_IMAGE:-ghcr.io/tempoxyz/tempo:1.4.2}
+  init: true
+  restart: unless-stopped
+  profiles: [consensus]
+  environment:
+    RUST_LOG: ${RUST_LOG:-debug}
+  labels:
+    - "pyroscope.agent.enabled=true"
+    - "pyroscope.exporter=eBPF"
+
+services:
+  # ── Validators ───────────────────────────────────────────────────────
+  validator-0:
+    <<: *validator-defaults
+    container_name: tempo-validator-0
+    labels:
+      - "pyroscope.agent.enabled=true"
+      - "pyroscope.service=validator-0"
+      - "pyroscope.exporter=eBPF"
+    ports:
+      - "8545:8545"
+    networks:
+      default:
+        ipv4_address: 10.0.0.1
+    volumes:
+      - ./consensus/validator-0/signing.key:/tmp/signing-key:ro
+      - ./consensus/validator-0/signing.share:/tmp/signing-share:ro
+      - ./consensus/genesis.json:/tmp/genesis.json:ro
+
+  validator-1:
+    <<: *validator-defaults
+    container_name: tempo-validator-1
+    labels:
+      - "pyroscope.agent.enabled=true"
+      - "pyroscope.service=validator-1"
+      - "pyroscope.exporter=eBPF"
+    networks:
+      default:
+        ipv4_address: 10.0.0.2
+    volumes:
+      - ./consensus/validator-1/signing.key:/tmp/signing-key:ro
+      - ./consensus/validator-1/signing.share:/tmp/signing-share:ro
+      - ./consensus/genesis.json:/tmp/genesis.json:ro
+
+  validator-2:
+    <<: *validator-defaults
+    container_name: tempo-validator-2
+    labels:
+      - "pyroscope.agent.enabled=true"
+      - "pyroscope.service=validator-2"
+      - "pyroscope.exporter=eBPF"
+    networks:
+      default:
+        ipv4_address: 10.0.0.3
+    volumes:
+      - ./consensus/validator-2/signing.key:/tmp/signing-key:ro
+      - ./consensus/validator-2/signing.share:/tmp/signing-share:ro
+      - ./consensus/genesis.json:/tmp/genesis.json:ro
+
+  validator-3:
+    <<: *validator-defaults
+    container_name: tempo-validator-3
+    labels:
+      - "pyroscope.agent.enabled=true"
+      - "pyroscope.service=validator-3"
+      - "pyroscope.exporter=eBPF"
+    networks:
+      default:
+        ipv4_address: 10.0.0.4
+    volumes:
+      - ./consensus/validator-3/signing.key:/tmp/signing-key:ro
+      - ./consensus/validator-3/signing.share:/tmp/signing-share:ro
+      - ./consensus/genesis.json:/tmp/genesis.json:ro
+
+  # ── RPC follower nodes ───────────────────────────────────────────────
+  rpc-0:
+    <<: *rpc-defaults
+    container_name: tempo-rpc-0
+    depends_on:
+      validator-0:
+        condition: service_started
+    labels:
+      - "pyroscope.agent.enabled=true"
+      - "pyroscope.service=rpc-0"
+      - "pyroscope.exporter=eBPF"
+    networks:
+      default:
+        ipv4_address: 10.0.0.10
+    volumes:
+      - ./consensus/genesis.json:/tmp/genesis.json:ro
+    command:
+      - node
+      - --chain
+      - /tmp/genesis.json
+      - --datadir
+      - /tmp/data
+      - --follow
+      - "http://tempo-validator-0:8545"
+      - --http
+      - --http.addr
+      - "0.0.0.0"
+      - --http.port
+      - "8545"
+      - --http.api
+      - all
+      - --metrics
+      - "0.0.0.0:9001"
+      - --logs-otlp=http://alloy:4318/v1/logs
+      - --logs-otlp.filter=${LOG_LEVEL:-info,reth=debug}
+      - --tracing-otlp=http://alloy:4318/v1/traces
+      - --tracing-otlp.filter=${LOG_LEVEL:-info,reth=debug}
+      - --tracing-otlp.sample-ratio=${TRACE_SAMPLE_RATIO:-1.0}
+
+  rpc-1:
+    <<: *rpc-defaults
+    container_name: tempo-rpc-1
+    depends_on:
+      validator-1:
+        condition: service_started
+    labels:
+      - "pyroscope.agent.enabled=true"
+      - "pyroscope.service=rpc-1"
+      - "pyroscope.exporter=eBPF"
+    networks:
+      default:
+        ipv4_address: 10.0.0.11
+    volumes:
+      - ./consensus/genesis.json:/tmp/genesis.json:ro
+    command:
+      - node
+      - --chain
+      - /tmp/genesis.json
+      - --datadir
+      - /tmp/data
+      - --follow
+      - "http://tempo-validator-1:8545"
+      - --http
+      - --http.addr
+      - "0.0.0.0"
+      - --http.port
+      - "8545"
+      - --http.api
+      - all
+      - --metrics
+      - "0.0.0.0:9001"
+      - --logs-otlp=http://alloy:4318/v1/logs
+      - --logs-otlp.filter=${LOG_LEVEL:-info,reth=debug}
+      - --tracing-otlp=http://alloy:4318/v1/traces
+      - --tracing-otlp.filter=${LOG_LEVEL:-info,reth=debug}
+      - --tracing-otlp.sample-ratio=${TRACE_SAMPLE_RATIO:-1.0}
+
+  # ── Faucet node (follow-mode with built-in faucet RPC) ───────────────
+  faucet:
+    <<: *rpc-defaults
+    container_name: tempo-faucet
+    depends_on:
+      validator-0:
+        condition: service_started
+    labels:
+      - "pyroscope.agent.enabled=true"
+      - "pyroscope.service=faucet"
+      - "pyroscope.exporter=eBPF"
+    ports:
+      - "8546:8545"
+    networks:
+      default:
+        ipv4_address: 10.0.0.15
+    volumes:
+      - ./consensus/genesis.json:/tmp/genesis.json:ro
+    command:
+      - node
+      - --chain
+      - /tmp/genesis.json
+      - --datadir
+      - /tmp/data
+      - --follow
+      - "http://10.0.0.3:8545"
+      - --http
+      - --http.addr
+      - "0.0.0.0"
+      - --http.port
+      - "8545"
+      - --http.api
+      - all
+      - --metrics
+      - "0.0.0.0:9001"
+      - --faucet.enabled
+      - --faucet.private-key
+      - "${FAUCET_PRIVATE_KEY:-0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80}"
+      - --faucet.amount
+      - "${FAUCET_AMOUNT:-1000000000000000}"
+      - --faucet.address
+      - "0x20c0000000000000000000000000000000000000"
+      - --faucet.node-address
+      - "http://10.0.0.1:8545"
+      - --logs-otlp=http://alloy:4318/v1/logs
+      - --logs-otlp.filter=${LOG_LEVEL:-info,reth=debug}
+      - --tracing-otlp=http://alloy:4318/v1/traces
+      - --tracing-otlp.filter=${LOG_LEVEL:-info,reth=debug}
+      - --tracing-otlp.sample-ratio=${TRACE_SAMPLE_RATIO:-1.0}
+
+  # ── Traefik (reverse proxy / load balancer) ──────────────────────────
+  traefik:
+    image: traefik:v3.3
+    profiles: [consensus]
+    container_name: traefik
+    command:
+      - --providers.file.filename=/etc/traefik/dynamic.yml
+      - --providers.file.watch=true
+      - --entrypoints.rpc.address=:80
+      - --log.level=DEBUG
+      - --api.insecure=true
+      - --metrics.prometheus=true
+      - --metrics.prometheus.entryPoint=metrics
+      - --metrics.prometheus.addEntryPointsLabels=true
+      - --metrics.prometheus.addServicesLabels=true
+      - --metrics.prometheus.addRoutersLabels=true
+      - --entrypoints.metrics.address=:8082
+      - --tracing.otlp.http.endpoint=http://alloy:4318/v1/traces
+      - --tracing.serviceName=traefik
+      - --tracing.sampleRate=1.0
+    ports:
+      - "80:80"
+      - "8081:8080"
+    volumes:
+      - ./traefik/dynamic.yml:/etc/traefik/dynamic.yml:ro
+    networks:
+      default:
+        ipv4_address: 10.0.0.20
+
+  # ── Grafana Alloy (collector + eBPF profiler) ────────────────────────
+  alloy:
+    image: grafana/alloy:v1.8.3
+    profiles: [monitoring]
+    command:
+      - run
+      - /etc/alloy/config.alloy
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --stability.level=public-preview
+    privileged: true
+    pid: host
+    volumes:
+      - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /sys/kernel:/sys/kernel:ro
+      - /sys/fs/cgroup:/sys/fs/cgroup:ro
+    ports:
+      - "12345:12345"
+    networks:
+      default:
+        ipv4_address: 10.0.0.30
+    restart: unless-stopped
+
+  # ── Address metrics exporter (faucet balance) ────────────────────────
+  address-exporter:
+    image: ethpandaops/ethereum-address-metrics-exporter:latest
+    profiles: [monitoring]
+    container_name: address-exporter
+    volumes:
+      - ./address-exporter/config.yaml:/opt/config.yaml:ro
+    command:
+      - --config
+      - /opt/config.yaml
+    ports:
+      - "9091:9091"
+    networks:
+      default:
+        ipv4_address: 10.0.0.31
+    restart: unless-stopped
+
+  # ── Prometheus ───────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v3.2.1
+    profiles: [monitoring]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --web.enable-remote-write-receiver
+      - --storage.tsdb.retention.time=30d
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      default:
+        ipv4_address: 10.0.0.32
+    restart: unless-stopped
+
+  # ── Grafana Tempo (distributed tracing backend) ──────────────────────
+  grafana-tempo:
+    image: grafana/tempo:2.7.2
+    profiles: [monitoring]
+    command:
+      - -config.file=/etc/tempo/tempo.yaml
+    volumes:
+      - ./grafana-tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - tempo-data:/var/tempo
+    networks:
+      default:
+        ipv4_address: 10.0.0.33
+    restart: unless-stopped
+
+  # ── Loki (log aggregation) ───────────────────────────────────────────
+  loki:
+    image: grafana/loki:3.4.3
+    profiles: [monitoring]
+    command:
+      - -config.file=/etc/loki/loki.yaml
+    volumes:
+      - ./loki/loki.yaml:/etc/loki/loki.yaml:ro
+      - loki-data:/loki
+    networks:
+      default:
+        ipv4_address: 10.0.0.34
+    restart: unless-stopped
+
+  # ── Pyroscope (continuous profiling backend) ─────────────────────────
+  pyroscope:
+    image: grafana/pyroscope:1.13.2
+    profiles: [monitoring]
+    volumes:
+      - pyroscope-data:/data
+    networks:
+      default:
+        ipv4_address: 10.0.0.35
+    restart: unless-stopped
+
+  # ── Grafana (dashboards) ─────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:11.5.2
+    profiles: [monitoring]
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GF_SECURITY_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GF_SECURITY_ADMIN_PASSWORD:-admin}
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+      - loki
+      - grafana-tempo
+      - pyroscope
+    networks:
+      default:
+        ipv4_address: 10.0.0.36
+    restart: unless-stopped
+
+volumes:
+  prometheus-data:
+  tempo-data:
+  loki-data:
+  pyroscope-data:
+  grafana-data:
+
+networks:
+  default:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.0.0.0/24
+          gateway: 10.0.0.254

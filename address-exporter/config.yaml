@@ -1,0 +1,22 @@
+global:
+  logging: "info"
+  metricsAddr: ":9091"
+  namespace: eth_address
+  checkInterval: "15s"
+
+execution:
+  url: "http://10.0.0.15:8545"
+  timeout: "10s"
+
+# TIP-20 pathUSD contract address (genesis-deployed on Tempo).
+# eth_getBalance is NOT used — it always returns a fixed sentinel value on Tempo.
+# Balances are read via eth_call → balanceOf(address) on this contract.
+# https://docs.tempo.xyz/quickstart/evm-compatibility#handling-eth-native-token-balance-checks
+tip20_contract: "0x20c0000000000000000000000000000000000000"
+
+addresses:
+  account:
+    - name: faucet
+      address: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+      labels:
+        role: faucet

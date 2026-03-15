@@ -1,0 +1,37 @@
+site_name: Tempo Monitor
+site_description: Local Tempo consensus network with full observability stack
+site_url: https://github.com/alessandrolomanto/tempo-monitor
+docs_dir: docs
+repo_url: https://github.com/alessandrolomanto/tempo-monitor
+repo_name: alessandrolomanto/tempo-monitor
+
+nav:
+  - Quick Start: index.md
+  - Local DNS: local-dns.md
+  - Interact with Chain: usage.md
+  - Dashboards: dashboards.md
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: deep purple
+      accent: purple
+  features:
+    - navigation.tabs
+    - navigation.top
+    - search.highlight
+    - content.code.copy
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - pymdownx.details
+  - tables
+  - toc:
+      permalink: true

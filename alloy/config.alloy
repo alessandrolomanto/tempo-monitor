@@ -1,0 +1,147 @@
+otelcol.receiver.otlp "default" {
+  grpc {
+    endpoint = "0.0.0.0:4317"
+  }
+  http {
+    endpoint = "0.0.0.0:4318"
+  }
+
+  output {
+    logs   = [otelcol.exporter.loki.default.input]
+    traces = [otelcol.exporter.otlp.tempo.input]
+  }
+}
+
+prometheus.scrape "execution" {
+  targets = [
+    {__address__ = "tempo-validator-0:9001", instance = "validator-0"},
+    {__address__ = "tempo-validator-1:9001", instance = "validator-1"},
+    {__address__ = "tempo-validator-2:9001", instance = "validator-2"},
+    {__address__ = "tempo-validator-3:9001", instance = "validator-3"},
+    {__address__ = "tempo-rpc-0:9001",       instance = "rpc-0"},
+    {__address__ = "tempo-rpc-1:9001",       instance = "rpc-1"},
+    {__address__ = "tempo-faucet:9001",      instance = "faucet"},
+  ]
+  forward_to      = [prometheus.remote_write.default.receiver]
+  scrape_interval = "15s"
+  job_name        = "tempo-execution"
+}
+
+prometheus.scrape "consensus" {
+  targets = [
+    {__address__ = "tempo-validator-0:8001", instance = "validator-0"},
+    {__address__ = "tempo-validator-1:8001", instance = "validator-1"},
+    {__address__ = "tempo-validator-2:8001", instance = "validator-2"},
+    {__address__ = "tempo-validator-3:8001", instance = "validator-3"},
+  ]
+  forward_to      = [prometheus.remote_write.default.receiver]
+  scrape_interval = "15s"
+  job_name        = "tempo-consensus"
+}
+
+prometheus.scrape "traefik" {
+  targets = [
+    {__address__ = "traefik:8082", instance = "traefik"},
+  ]
+  forward_to      = [prometheus.remote_write.default.receiver]
+  scrape_interval = "15s"
+  job_name        = "traefik"
+}
+
+prometheus.scrape "address_exporter" {
+  targets = [
+    {__address__ = "address-exporter:9091", instance = "address-exporter"},
+  ]
+  forward_to      = [prometheus.remote_write.default.receiver]
+  scrape_interval = "15s"
+  job_name        = "address-exporter"
+}
+
+prometheus.remote_write "default" {
+  endpoint {
+    url = "http://prometheus:9090/api/v1/write"
+  }
+}
+
+otelcol.exporter.loki "default" {
+  forward_to = [loki.write.default.receiver]
+}
+
+loki.write "default" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}
+
+otelcol.exporter.otlp "tempo" {
+  client {
+    endpoint = "grafana-tempo:4317"
+    tls {
+      insecure = true
+    }
+  }
+}
+
+pyroscope.scrape "heap" {
+  targets = [
+    {__address__ = "tempo-validator-0:9001", service_name = "validator-0"},
+    {__address__ = "tempo-validator-1:9001", service_name = "validator-1"},
+    {__address__ = "tempo-validator-2:9001", service_name = "validator-2"},
+    {__address__ = "tempo-validator-3:9001", service_name = "validator-3"},
+    {__address__ = "tempo-rpc-0:9001",       service_name = "rpc-0"},
+    {__address__ = "tempo-rpc-1:9001",       service_name = "rpc-1"},
+    {__address__ = "tempo-faucet:9001",      service_name = "faucet"},
+  ]
+  forward_to      = [pyroscope.write.default.receiver]
+  scrape_interval = "15s"
+
+  profiling_config {
+    profile.memory {
+      enabled = true
+      path    = "/debug/pprof/heap"
+      delta   = false
+    }
+    profile.process_cpu { enabled = false }
+    profile.goroutine   { enabled = false }
+    profile.block        { enabled = false }
+    profile.mutex        { enabled = false }
+    profile.fgprof       { enabled = false }
+  }
+}
+
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+}
+
+discovery.relabel "tempo_nodes" {
+  targets = discovery.docker.containers.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_label_pyroscope_agent_enabled"]
+    regex         = "true"
+    action        = "keep"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_label_pyroscope_service"]
+    target_label  = "service_name"
+  }
+}
+
+discovery.process "tempo_nodes" {
+  join = discovery.relabel.tempo_nodes.output
+}
+
+pyroscope.ebpf "tempo_nodes" {
+  targets          = discovery.process.tempo_nodes.targets
+  forward_to       = [pyroscope.write.default.receiver]
+  demangle         = "full"
+  collect_interval = "15s"
+  sample_rate      = 97
+}
+
+pyroscope.write "default" {
+  endpoint {
+    url = "http://pyroscope:4040"
+  }
+}
