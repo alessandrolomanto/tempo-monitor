@@ -22,7 +22,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          current=$(grep '^DOCKER_IMAGE=' .envrc | sed 's/.*://')
+          current=$(grep '^DOCKER_IMAGE=' .env.example | sed 's/.*://')
           latest=$(gh api "repos/$TEMPO_REPO/releases/latest" --jq '.tag_name' | sed 's/^v//')
           echo "current=$current" >> "$GITHUB_OUTPUT"
           echo "latest=$latest" >> "$GITHUB_OUTPUT"
@@ -36,10 +36,10 @@ jobs:
           new="${{ steps.versions.outputs.latest }}"
           branch="chore/bump-tempo-${new}"
 
-          sed -i "s/${old}/${new}/g" .envrc docker-compose.yaml
+          sed -i "s/${old}/${new}/g" .env.example docker-compose.yaml
 
           git checkout -b "$branch"
-          git add .envrc docker-compose.yaml
+          git add .env.example docker-compose.yaml
           git commit -m "chore: bump tempo image to ${new}"
           git push -u origin "$branch"
           gh pr create \
