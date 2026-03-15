@@ -158,7 +158,7 @@ services:
       - --datadir
       - /tmp/data
       - --follow
-      - "http://tempo-validator-0:8545"
+      - "http://10.0.0.1:8545"
       - --http
       - --http.addr
       - "0.0.0.0"
@@ -196,7 +196,7 @@ services:
       - --datadir
       - /tmp/data
       - --follow
-      - "http://tempo-validator-1:8545"
+      - "http://10.0.0.2:8545"
       - --http
       - --http.addr
       - "0.0.0.0"
