@@ -1,0 +1,48 @@
+name: Check Tempo version
+
+on:
+  schedule:
+    - cron: "0 8 * * 1" # every Monday at 08:00 UTC
+  workflow_dispatch:
+
+env:
+  TEMPO_REPO: tempoxyz/tempo
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get current and latest versions
+        id: versions
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          current=$(grep '^DOCKER_IMAGE=' .envrc | sed 's/.*://')
+          latest=$(gh api "repos/$TEMPO_REPO/releases/latest" --jq '.tag_name' | sed 's/^v//')
+          echo "current=$current" >> "$GITHUB_OUTPUT"
+          echo "latest=$latest" >> "$GITHUB_OUTPUT"
+
+      - name: Update and open PR
+        if: steps.versions.outputs.current != steps.versions.outputs.latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          old="${{ steps.versions.outputs.current }}"
+          new="${{ steps.versions.outputs.latest }}"
+          branch="chore/bump-tempo-${new}"
+
+          sed -i "s/${old}/${new}/g" .envrc docker-compose.yaml
+
+          git checkout -b "$branch"
+          git add .envrc docker-compose.yaml
+          git commit -m "chore: bump tempo image to ${new}"
+          git push -u origin "$branch"
+          gh pr create \
+            --title "chore: bump tempo image to ${new}" \
+            --body "Bumps \`DOCKER_IMAGE\` from \`${old}\` to \`${new}\`." \
+            --base main
