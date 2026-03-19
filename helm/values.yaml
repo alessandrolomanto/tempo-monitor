@@ -1,0 +1,353 @@
+# ─────────────────────────────────────────────────────────────
+# tempo-monitor Helm Chart
+# https://github.com/alessandrolomanto/tempo-monitor
+#
+# Profile: selects which components are deployed.
+#   consensus        Tempo consensus network only (validators + RPC + Traefik)
+#   monitoring       Monitoring stack only (Prometheus, Grafana, Loki, Tempo, Pyroscope, Alloy)
+#   full             consensus + monitoring combined
+# ─────────────────────────────────────────────────────────────
+
+# ── Deployment profile ────────────────────────────────────────
+# Valid values: consensus | monitoring | full
+profile: full
+
+# ── Global defaults ──────────────────────────────────────────
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# Annotations added to all resources
+commonAnnotations: {}
+
+# ── Tempo node settings ──────────────────────────────────────
+tempo:
+  image: ghcr.io/tempoxyz/tempo:1.4.1
+  # image:   # override as struct if you need pullPolicy / secrets
+  pullPolicy: IfNotPresent
+
+  # RPC HTTP server
+  rpc:
+    port: 8545
+
+  # RPC WebSocket server
+  ws:
+    port: 8546
+
+  # Execution layer metrics (reth)
+  execution:
+    metricsPort: 9001
+
+  # Consensus layer metrics
+  consensus:
+    metricsPort: 8001
+    listenPort: 8000
+
+  # Rust log level (comma-separated, e.g. "info,reth=debug")
+  rustLog: debug
+
+  # OTLP settings
+  otlp:
+    enabled: true
+    endpoint: "http://{{ include "tempo-monitor.fullname" . }}-alloy:4318"
+    logFilter: "info,reth=debug"
+    traceSampleRatio: "1.0"
+
+  # Fee recipient for block proposals (consensus-layer address)
+  feeRecipient: "0x0000000000000000000000000000000000000000"
+
+  # Genesis JSON — set to a ConfigMap name or inline base64
+  # In the templates, genesis is expected as a data key inside a Secret/ConfigMap.
+  # Leave empty and use genesisExistingSecret / genesisConfigMap to provide your own.
+  genesis: ""
+  # Existing Secret name that contains consensus/genesis.json under key "genesis.json"
+  genesisExistingSecret: ""
+  # Existing ConfigMap name
+  genesisConfigMap: ""
+
+  # Validator signing keys — one block per validator, see values.validators
+  signingKeyExistingSecret: ""
+  signingShareExistingSecret: ""
+
+# ── Validator nodes ─────────────────────────────────────────
+validators:
+  # Number of validators to deploy (0–4 supported; genesis must match)
+  count: 4
+
+  # Ordered list of hostnames / cluster-internal addresses for each validator.
+  # These are the --consensus.listen-address values.
+  # MUST have exactly `count` entries. The first entry is used as the leader
+  # for RPC follower drift checks.
+  # On Kubernetes use StatefulSet headless services: tempo-monitor-validator-{0,1,...}.svc
+  hosts:
+    - "tempo-monitor-validator-0"
+    - "tempo-monitor-validator-1"
+    - "tempo-monitor-validator-2"
+    - "tempo-monitor-validator-3"
+
+  # Per-validator overrides (indexed by ordinal).
+  # Example: set signing key for validator 0:
+  #   signingKeys:
+  #     0: |
+  #       -----BEGIN EC PRIVATE KEY-----
+  #       ...
+  # Set to "" to use the secret names from values.tempo.signingKeyExistingSecret
+  signingKeys: {}
+  signingShares: {}
+
+  # Persistent storage
+  persistence:
+    enabled: true
+    storageClass: ""
+    dataSize: 20Gi
+    consensusDataSize: 10Gi
+
+  # Node selector / tolerations / affinity
+  nodeSelector: {}
+  tolerations: []
+  # affinity:
+  #   podAntiAffinity:
+  #     preferredDuringSchedulingIgnoredDuringExecution:
+  #       - weight: 100
+  #         podAffinityTerm:
+  #           labelSelector:
+  #             matchLabels:
+  #               app.kubernetes.io/component: validator
+  #           topologyKey: kubernetes.io/hostname
+
+  # Resource requests/limits
+  resources:
+    requests:
+      cpu: 500m
+      memory: 2Gi
+    limits:
+      memory: 8Gi
+
+# ── RPC follower nodes ───────────────────────────────────────
+rpc:
+  # Number of RPC follower nodes to deploy.
+  # rpc-0 follows validators[0], rpc-1 follows validators[1], etc.
+  count: 2
+
+  # Persistent storage
+  persistence:
+    enabled: true
+    storageClass: ""
+    dataSize: 50Gi
+
+  nodeSelector: {}
+  tolerations: []
+  resources:
+    requests:
+      cpu: 500m
+      memory: 2Gi
+    limits:
+      memory: 8Gi
+
+  # RPC load-balancer health-check settings
+  healthCheck:
+    # Max age of the local block before marking this node stale (seconds)
+    maxAgeSecs: 30
+    # Max drift from leader block timestamp before marking lagging (seconds)
+    maxDriftSecs: 30
+    # Leader host — empty = use the first validator host (validators.hosts[0])
+    leaderHost: ""
+
+# ── Faucet node ────────────────────────────────────────────
+faucet:
+  enabled: true
+
+  # Persistent storage
+  persistence:
+    enabled: true
+    storageClass: ""
+    dataSize: 20Gi
+
+  nodeSelector: {}
+  tolerations: []
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      memory: 2Gi
+
+  # Built-in faucet private key (Hex-encoded ECDSA private key)
+  # DO NOT use this in production — set via faucet.existingSecret
+  privateKey: "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+
+  # Amount transferred per faucet request (Wei)
+  amount: "1000000000000000"
+
+  # TIP-20 contract address for balance checks (see address-exporter)
+  tip20Contract: "0x20c0000000000000000000000000000000000000"
+
+  # Mount an existing Secret instead of embedding the private key in values.yaml
+  existingSecret: ""
+
+# ── Traefik ingress / load-balancer ─────────────────────────
+traefik:
+  enabled: true
+
+  # Service type: ClusterIP | LoadBalancer | NodePort
+  serviceType: LoadBalancer
+
+  # JSON-RPC entrypoint port on Traefik
+  rpcPort: 80
+
+  # Dashboard port (insecure)
+  dashboardPort: 8080
+
+  # Metrics port
+  metricsPort: 8082
+
+  # Ingress for the RPC endpoint (optional — only if you want external access
+  # through the k8s Ingress controller rather than the Traefik LoadBalancer).
+  ingress:
+    enabled: false
+    className: "traefik"
+    annotations: {}
+      # kubernetes.io/ingress.class: traefik
+    hosts:
+      - host: rpc.tempo.local
+        paths:
+          - path: /
+            pathType: Prefix
+    tls: []
+
+  # Resource limits
+  resources:
+    requests:
+      cpu: 100m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+
+# ── Monitoring stack ─────────────────────────────────────────
+monitoring:
+  enabled: true
+
+  # Persistent storage for each monitoring component
+  persistence:
+    prometheus:
+      enabled: true
+      storageClass: ""
+      size: 10Gi
+    grafana:
+      enabled: true
+      storageClass: ""
+      size: 1Gi
+    loki:
+      enabled: true
+      storageClass: ""
+      size: 10Gi
+    tempo:
+      enabled: true
+      storageClass: ""
+      size: 10Gi
+    pyroscope:
+      enabled: true
+      storageClass: ""
+      size: 5Gi
+
+  # Grafana credentials
+  grafana:
+    adminUser: admin
+    # adminPassword: ""   # set via existingSecret to avoid plaintext
+    existingSecret: ""
+    anonymous:
+      enabled: true
+      orgRole: Viewer
+
+  # Prometheus scrape / evaluation intervals
+  prometheus:
+    scrapeInterval: 15s
+    evaluationInterval: 15s
+    retention: 30d
+
+  # Grafana Alloy configuration
+  alloy:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        memory: 512Mi
+
+  # Pyroscope resources
+  pyroscope:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        memory: 1Gi
+
+  nodeSelector: {}
+  tolerations: []
+  # tolerations:
+  #   - key: "monitoring"
+  #     operator: "Exists"
+  #     effect: "NoSchedule"
+
+# ── MPP demo API (payment-gated RPC proxy) ──────────────────
+mpp:
+  enabled: false
+
+  image: ""
+  # image: ghcr.io/alessandrolomanto/tempo-monitor/mpp-demo:latest
+
+  # Wallet / key used to relay transactions and pay gas.
+  # Set via existingSecret in production.
+  feePayerKey: "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+  existingSecret: ""
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+
+  service:
+    type: ClusterIP
+    port: 3030
+
+  nodeSelector: {}
+  tolerations: []
+
+# ── Security contexts ───────────────────────────────────────
+# Pod security context (all pods)
+podSecurityContext:
+  runAsNonRoot: false
+  fsGroup: 0
+
+# Container security context (all containers)
+securityContext: {}
+
+# ── Networking ──────────────────────────────────────────────
+# Kubernetes network policy — disabled by default
+networkPolicy:
+  enabled: false
+  # egress:
+  #   - to:
+  #       - podSelector: {}
+  #     ports:
+  #       - protocol: TCP
+  #         port: 53
+  #       - protocol: UDP
+  #         port: 53
+
+# ── RBAC ────────────────────────────────────────────────────
+# ClusterRole / ClusterRoleBinding — needed for Alloy eBPF profiling
+rbac:
+  create: true
+
+# ServiceAccount names — set to "" to let Helm create them
+serviceAccounts:
+  validators: ""
+  rpc: ""
+  traefik: ""
+  monitoring: ""
+  alloy: ""
+  mpp: ""

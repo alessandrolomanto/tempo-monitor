@@ -1,0 +1,314 @@
+{{- $root := . }}
+{{- $profile := .Values.profile }}
+{{- if or (eq $profile "monitoring") (eq $profile "full") }}
+
+{{- /* helper to build a PVC spec */ -}}
+{{- define "tempo-monitor.pvc" -}}
+{{- if .enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .name }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    app.kubernetes.io/component: {{ .component }}
+    {{- include "tempo-monitor.labels" $root | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: {{ .storageClass | default "" | quote }}
+  resources:
+    requests:
+      storage: {{ .size }}
+---
+{{- end }}
+{{- end }}
+
+# ── Prometheus ──────────────────────────────────────────────
+{{- if .Values.monitoring.persistence.prometheus.enabled }}
+{{- $pvc := dict "enabled" true "name" (printf "%s-prometheus" (include "tempo-monitor.fullname" .)) "component" "prometheus" "storageClass" .Values.monitoring.persistence.prometheus.storageClass "size" .Values.monitoring.persistence.prometheus.size -}}
+{{- include "tempo-monitor.pvc" (merge (dict "root" $root) $pvc) }}
+{{- end }}
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "tempo-monitor.fullname" $root }}-prometheus
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    app.kubernetes.io/component: prometheus
+    {{- include "tempo-monitor.labels" $root | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: prometheus
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: prometheus
+      {{- include "tempo-monitor.labels" $root | nindent 8 }}
+    spec:
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v3.2.1
+          args:
+            - --config.file=/etc/prometheus/prometheus.yml
+            - --web.enable-remote-write-receiver
+            - --storage.tsdb.retention.time={{ .Values.monitoring.prometheus.retention }}
+          ports:
+            - name: http
+              containerPort: 9090
+          volumeMounts:
+            - name: config
+              mountPath: /etc/prometheus/prometheus.yml
+              subPath: prometheus.yml
+              readOnly: true
+            {{- if .Values.monitoring.persistence.prometheus.enabled }}
+            - name: data
+              mountPath: /prometheus
+            {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "tempo-monitor.fullname" $root }}-prometheus
+        {{- if .Values.monitoring.persistence.prometheus.enabled }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "tempo-monitor.fullname" $root }}-prometheus
+        {{- else }}
+        - name: data
+          emptyDir: {}
+        {{- end }}
+
+---
+# ── Grafana Alloy ──────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "tempo-monitor.fullname" $root }}-alloy
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    app.kubernetes.io/component: alloy
+    {{- include "tempo-monitor.labels" $root | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: alloy
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: alloy
+      {{- include "tempo-monitor.labels" $root | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "tempo-monitor.fullname" $root }}-alloy
+      hostPID: true
+      containers:
+        - name: alloy
+          image: grafana/alloy:v1.8.3
+          args:
+            - run
+            - /etc/alloy/config.alloy
+            - --server.http.listen-addr=0.0.0.0:12345
+            - --stability.level=public-preview
+          ports:
+            - name: http
+              containerPort: 12345
+          volumeMounts:
+            - name: config
+              mountPath: /etc/alloy/config.alloy
+              subPath: config.alloy
+              readOnly: true
+            - name: docker-sock
+              mountPath: /var/run/docker.sock
+            - name: sys-kernel
+              mountPath: /sys/kernel
+              readOnly: true
+            - name: sys-cgroup
+              mountPath: /sys/fs/cgroup
+              readOnly: true
+          {{- with .Values.monitoring.alloy.resources }}
+          resources: {{ toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "tempo-monitor.fullname" $root }}-alloy
+        - name: docker-sock
+          hostPath:
+            path: /var/run/docker.sock
+        - name: sys-kernel
+          hostPath:
+            path: /sys/kernel
+        - name: sys-cgroup
+          hostPath:
+            path: /sys/fs/cgroup
+
+---
+# ── Grafana Tempo ─────────────────────────────────────────
+{{- if .Values.monitoring.persistence.tempo.enabled }}
+{{- $pvc := dict "enabled" true "name" (printf "%s-grafana-tempo" (include "tempo-monitor.fullname" .)) "component" "grafana-tempo" "storageClass" .Values.monitoring.persistence.tempo.storageClass "size" .Values.monitoring.persistence.tempo.size -}}
+{{- include "tempo-monitor.pvc" (merge (dict "root" $root) $pvc) }}
+{{- end }}
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "tempo-monitor.fullname" $root }}-grafana-tempo
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    app.kubernetes.io/component: grafana-tempo
+    {{- include "tempo-monitor.labels" $root | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: grafana-tempo
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: grafana-tempo
+      {{- include "tempo-monitor.labels" $root | nindent 8 }}
+    spec:
+      containers:
+        - name: tempo
+          image: grafana/tempo:2.7.2
+          args: ["-config.file=/etc/tempo/tempo.yaml"]
+          ports:
+            - name: otlp-grpc
+              containerPort: 4317
+            - name: otlp-http
+              containerPort: 4318
+            - name: tempo-http
+              containerPort: 3200
+          volumeMounts:
+            - name: config
+              mountPath: /etc/tempo/tempo.yaml
+              subPath: tempo.yaml
+              readOnly: true
+            {{- if .Values.monitoring.persistence.tempo.enabled }}
+            - name: data
+              mountPath: /var/tempo
+            {{- end }}
+          {{- with .Values.monitoring.tempo.resources | default (dict) }}
+          resources: {{ toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "tempo-monitor.fullname" $root }}-monitoring-config
+        {{- if .Values.monitoring.persistence.tempo.enabled }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "tempo-monitor.fullname" $root }}-grafana-tempo
+        {{- else }}
+        - name: data
+          emptyDir: {}
+        {{- end }}
+
+---
+# ── Loki ──────────────────────────────────────────────────
+{{- if .Values.monitoring.persistence.loki.enabled }}
+{{- $pvc := dict "enabled" true "name" (printf "%s-loki" (include "tempo-monitor.fullname" .)) "component" "loki" "storageClass" .Values.monitoring.persistence.loki.storageClass "size" .Values.monitoring.persistence.loki.size -}}
+{{- include "tempo-monitor.pvc" (merge (dict "root" $root) $pvc) }}
+{{- end }}
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "tempo-monitor.fullname" $root }}-loki
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    app.kubernetes.io/component: loki
+    {{- include "tempo-monitor.labels" $root | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: loki
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: loki
+      {{- include "tempo-monitor.labels" $root | nindent 8 }}
+    spec:
+      containers:
+        - name: loki
+          image: grafana/loki:3.4.3
+          args: ["-config.file=/etc/loki/loki.yaml"]
+          ports:
+            - name: http
+              containerPort: 3100
+          volumeMounts:
+            - name: config
+              mountPath: /etc/loki/loki.yaml
+              subPath: loki.yaml
+              readOnly: true
+            {{- if .Values.monitoring.persistence.loki.enabled }}
+            - name: data
+              mountPath: /loki
+            {{- end }}
+          {{- with .Values.monitoring.loki.resources | default (dict) }}
+          resources: {{ toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "tempo-monitor.fullname" $root }}-monitoring-config
+        {{- if .Values.monitoring.persistence.loki.enabled }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "tempo-monitor.fullname" $root }}-loki
+        {{- else }}
+        - name: data
+          emptyDir: {}
+        {{- end }}
+
+---
+# ── Pyroscope ────────────────────────────────────────────
+{{- if .Values.monitoring.persistence.pyroscope.enabled }}
+{{- $pvc := dict "enabled" true "name" (printf "%s-pyroscope" (include "tempo-monitor.fullname" .)) "component" "pyroscope" "storageClass" .Values.monitoring.persistence.pyroscope.storageClass "size" .Values.monitoring.persistence.pyroscope.size -}}
+{{- include "tempo-monitor.pvc" (merge (dict "root" $root) $pvc) }}
+{{- end }}
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "tempo-monitor.fullname" $root }}-pyroscope
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    app.kubernetes.io/component: pyroscope
+    {{- include "tempo-monitor.labels" $root | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: pyroscope
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: pyroscope
+      {{- include "tempo-monitor.labels" $root | nindent 8 }}
+    spec:
+      containers:
+        - name: pyroscope
+          image: grafana/pyroscope:1.13.2
+          ports:
+            - name: http
+              containerPort: 4040
+          {{- if .Values.monitoring.persistence.pyroscope.enabled }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          {{- end }}
+          {{- with .Values.monitoring.pyroscope.resources }}
+          resources: {{ toYaml . | nindent 12 }}
+          {{- end }}
+      {{- if .Values.monitoring.persistence.pyroscope.enabled }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "tempo-monitor.fullname" $root }}-pyroscope
+      {{- end }}
+
+{{- end }}{{/* end profile guard */}}

@@ -1,0 +1,67 @@
+{{- $root := . }}
+{{- $profile := .Values.profile }}
+{{- if or (eq $profile "consensus") (eq $profile "full") }}
+---
+# JSON-RPC load-balancer service
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "tempo-monitor.fullname" $root }}-traefik
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    app.kubernetes.io/component: traefik
+    {{- include "tempo-monitor.labels" $root | nindent 4 }}
+spec:
+  type: {{ .Values.traefik.serviceType }}
+  ports:
+    - name: rpc
+      port: 80
+      targetPort: rpc
+    - name: dashboard
+      port: 8080
+      targetPort: dashboard
+    - name: metrics
+      port: 9090
+      targetPort: metrics
+  selector:
+    app.kubernetes.io/component: traefik
+    app.kubernetes.io/name: traefik
+
+{{- if .Values.traefik.ingress.enabled }}
+---
+# Ingress for external RPC access (through Kubernetes Ingress controller)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "tempo-monitor.fullname" $root }}-traefik
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    app.kubernetes.io/component: traefik
+    {{- include "tempo-monitor.labels" $root | nindent 4 }}
+  {{- with .Values.traefik.ingress.annotations }}
+  annotations: {{ toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .Values.traefik.ingress.className }}
+  ingressClassName: {{ .Values.traefik.ingress.className }}
+  {{- end }}
+  rules:
+    {{- range .Values.traefik.ingress.hosts }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+          {{- range .paths }}
+          - path: {{ .path }}
+            pathType: {{ .pathType | default "Prefix" }}
+            backend:
+              service:
+                name: {{ include "tempo-monitor.fullname" $root }}-traefik
+                port:
+                  number: 80
+          {{- end }}
+    {{- end }}
+  {{- if .Values.traefik.ingress.tls }}
+  tls: {{ toYaml .Values.traefik.ingress.tls | nindent 4 }}
+  {{- end }}
+{{- end }}
+{{- end }}{{/* end profile guard */}}

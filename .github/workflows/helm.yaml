@@ -1,0 +1,230 @@
+name: Helm Chart
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'helm/**'
+      - '.github/workflows/helm.yaml'
+  pull_request:
+    paths:
+      - 'helm/**'
+      - '.github/workflows/helm.yaml'
+  release:
+    types: [published]
+
+env:
+  CHART_DIR: helm
+  CHART_NAME: tempo-monitor
+  OCI_REGISTRY: ghcr.io
+  # IMAGE_TAG is set from the chart appVersion / docker image tag
+
+jobs:
+  # ── Lint ──────────────────────────────────────────────────────────────
+  lint:
+    name: Lint Helm chart
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.17.0
+
+      - name: Add Bitnami repo (for common helpers reference)
+        run: |
+          helm repo add bitnami https://charts.bitnami.com/bitnami --force-update
+          helm repo update
+
+      - name: Helm lint
+        run: |
+          helm lint \
+            --strict \
+            --set profile=full \
+            --set tempo.image=ghcr.io/tempoxyz/tempo:1.4.1 \
+            ./{{ env.CHART_DIR }}
+
+  # ── Validate (dry-run install) ────────────────────────────────────────
+  validate:
+    name: Validate Kubernetes install (dry-run)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.17.0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Generate a dummy genesis.json for the dry-run
+      - name: Create genesis placeholder
+        run: |
+          mkdir -p /tmp/genesis
+          echo '{"config":{},"genesis_time":"","nonce":"0x0000000000000000","extradata":"","alloc":{},"number":"0","gas_limit":"0","difficulty":"0","alloc":{}}' \
+            > /tmp/genesis/genesis.json
+          cp /tmp/genesis/genesis.json consensus/genesis.json
+
+      - name: Helm dry-run (consensus profile)
+        run: |
+          helm template release-test ./{{ env.CHART_DIR }} \
+            --namespace tempo-test \
+            --create-namespace \
+            --set profile=consensus \
+            --set tempo.image=ghcr.io/tempoxyz/tempo:1.4.1 \
+            --set validators.count=2 \
+            --set rpc.count=1 \
+            --set faucet.enabled=true \
+            --set monitoring.enabled=false \
+            --debug --dry-run=server 2>&1 | head -200
+
+      - name: Helm dry-run (full profile)
+        run: |
+          helm template release-test ./{{ env.CHART_DIR }} \
+            --namespace tempo-test \
+            --create-namespace \
+            --set profile=full \
+            --set tempo.image=ghcr.io/tempoxyz/tempo:1.4.1 \
+            --set validators.count=4 \
+            --set rpc.count=2 \
+            --set monitoring.enabled=true \
+            --debug --dry-run=server 2>&1 | head -200
+
+  # ── Package ─────────────────────────────────────────────────────────
+  package:
+    name: Package Helm chart
+    runs-on: ubuntu-latest
+    needs: [lint, validate]
+    outputs:
+      chart_version: ${{ steps.meta.outputs.version }}
+      chart_basename: ${{ steps.meta.outputs.basename }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.17.0
+
+      - id: meta
+        run: |
+          VERSION=$(helm show chart ./{{ env.CHART_DIR }}/Chart.yaml | grep '^version:' | awk '{print $2}' | xargs)
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "basename={{ env.CHART_NAME }}-${VERSION}.tgz" >> $GITHUB_OUTPUT
+
+      - name: Helm package
+        run: |
+          helm package ./{{ env.CHART_DIR }}/Chart.yaml \
+            --destination /tmp/helm-charts/
+          ls -la /tmp/helm-charts/
+
+      - name: Upload chart artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.meta.outputs.chart_basename }}
+          path: /tmp/helm-charts/${{ steps.meta.outputs.chart_basename }}
+          retention-days: 5
+
+  # ── Publish to GHCR (on main / release only) ──────────────────────────
+  publish:
+    name: Publish Helm chart to GHCR
+    runs-on: ubuntu-latest
+    needs: [package]
+    permissions:
+      contents: read
+      packages: write
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.17.0
+          key: ${{ secrets.GITHUB_TOKEN }}
+        env:
+          HELM_EXPERIMENTAL_OCI: 1
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.OCI_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download chart artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.package.outputs.chart_basename }}
+          path: /tmp/helm-charts/
+
+      - name: Tag chart for GHCR
+        run: |
+          CHART_REF="${{ env.OCI_REGISTRY }}/${{ github.repository_owner }}/${{ env.CHART_NAME }}"
+          CHART_VERSION="${{ needs.package.outputs.chart_version }}"
+          CHART_FILE="${{ needs.package.outputs.chart_basename }}"
+
+          # Load the chart tarball into Helm
+          helm chart save /tmp/helm-charts/${CHART_FILE} ${CHART_REF}:${CHART_VERSION}
+          helm chart save /tmp/helm-charts/${CHART_FILE} ${CHART_REF}:latest
+
+          echo "Chart saved to ${CHART_REF}:${CHART_VERSION}"
+          echo "Chart saved to ${CHART_REF}:latest"
+
+      - name: Push version tag to GHCR
+        env:
+          HELM_EXPERIMENTAL_OCI: 1
+        run: |
+          CHART_REF="${{ env.OCI_REGISTRY }}/${{ github.repository_owner }}/${{ env.CHART_NAME }}"
+          CHART_VERSION="${{ needs.package.outputs.chart_version }}"
+          helm chart push ${CHART_REF}:${CHART_VERSION}
+
+      - name: Push latest tag to GHCR
+        env:
+          HELM_EXPERIMENTAL_OCI: 1
+        run: |
+          CHART_REF="${{ env.OCI_REGISTRY }}/${{ github.repository_owner }}/${{ env.CHART_NAME }}"
+          helm chart push ${CHART_REF}:latest
+
+      - name: Add version-specific OCI digest comment to the release
+        if: github.event_name == 'release'
+        env:
+          HELM_EXPERIMENTAL_OCI: 1
+        run: |
+          CHART_REF="${{ env.OCI_REGISTRY }}/${{ github.repository_owner }}/${{ env.CHART_NAME }}"
+          CHART_VERSION="${{ needs.package.outputs.chart_version }}"
+          DIGEST=$(helm chart export ${CHART_REF}:${CHART_VERSION} --destination /tmp/export/ 2>/dev/null && \
+            openssl dgst -sha256 /tmp/export/${{ env.CHART_NAME }}/Chart.yaml | awk '{print $2}')
+          echo "Chart digest: ${DIGEST}"
+
+  # ── Publish provenance (SLSA provenance) ─────────────────────────────
+  provenance:
+    name: Generate SLSA provenance
+    runs-on: ubuntu-latest
+    needs: [publish]
+    permissions:
+      actions: read
+      id-token: write
+      contents: write
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download chart artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.package.outputs.chart_basename }}
+
+      - name: Generate SLSA provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: "${{ env.OCI_REGISTRY }}/${{ github.repository_owner }}/${{ env.CHART_NAME }}"
+          sha512: $(openssl dgst -sha512 /tmp/helm-charts/${{ needs.package.outputs.chart_basename }} | awk '{print $2}')
+          attestations: /tmp/attestations
+          predicate-type: https://slsa.dev/provenance/v1

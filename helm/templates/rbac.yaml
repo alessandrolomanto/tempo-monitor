@@ -1,0 +1,45 @@
+{{- $root := . }}
+{{- if .Values.rbac.create }}
+# ClusterRole needed for Grafana Alloy's eBPF profiler to access:
+#   /sys/kernel (BPF filesystem), /sys/fs/cgroup (cgroup metrics)
+#   /var/run/docker.sock (container discovery)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "tempo-monitor.fullname" $root }}-alloy
+  labels:
+    {{- include "tempo-monitor.labels" $root | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["nodes", "nodes/proxy", "pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "tempo-monitor.fullname" $root }}-alloy
+  labels:
+    {{- include "tempo-monitor.labels" $root | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "tempo-monitor.fullname" $root }}-alloy
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "tempo-monitor.fullname" $root }}-alloy
+    namespace: {{ $root.Release.Namespace }}
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "tempo-monitor.fullname" $root }}-alloy
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    app.kubernetes.io/component: alloy
+    {{- include "tempo-monitor.labels" $root | nindent 4 }}
+{{- end }}{{/* rbac.create */}}

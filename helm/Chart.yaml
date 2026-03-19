@@ -1,0 +1,21 @@
+apiVersion: v2
+name: tempo-monitor
+description: |
+  A local Tempo consensus devnet with built-in monitoring stack.
+  Includes validators, RPC followers, Traefik load-balancer, Prometheus,
+  Grafana, Loki, Tempo, Pyroscope and Grafana Alloy.
+type: application
+version: 0.1.0
+appVersion: "1.4.1"
+keywords:
+  - tempo
+  - blockchain
+  - devnet
+  - observability
+  - grafana
+home: https://github.com/alessandrolomanto/tempo-monitor
+sources:
+  - https://github.com/alessandrolomanto/tempo-monitor
+maintainers:
+  - name: alessandrolomanto
+    url: https://github.com/alessandrolomanto

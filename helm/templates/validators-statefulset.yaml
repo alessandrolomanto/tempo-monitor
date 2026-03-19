@@ -1,0 +1,242 @@
+{{- $root := . }}
+{{- $profile := .Values.profile }}
+{{- if or (eq $profile "consensus") (eq $profile "full") }}
+
+{{- $tempoImage := include "tempo-monitor.image" . }}
+{{- $consensusPort := include "tempo-monitor.consensusMetricsPort" . }}
+{{- $executionMetricsPort := include "tempo-monitor.executionMetricsPort" . }}
+
+{{- range $i, $val := until (int .Values.validators.count) }}
+{{- $idx := printf "%d" $i }}
+{{- $name := printf "validator-%d" $i }}
+{{- $host := index $.Values.validators.hosts $i }}
+{{- $signingKey := "" }}
+{{- $signingShare := "" }}
+{{- if hasKey $.Values.validators.signingKeys $idx }}
+{{-   $signingKey = index $.Values.validators.signingKeys $idx }}
+{{- end }}
+{{- if hasKey $.Values.validators.signingShares $idx }}
+{{-   $signingShare = index $.Values.validators.signingShares $idx }}
+{{- end }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "tempo-monitor.fullname" $ }}-{{ $name }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    app.kubernetes.io/component: validator
+    app.kubernetes.io/name: {{ $name }}
+    {{- include "tempo-monitor.labels" $ | nindent 4 }}
+  {{- with $.Values.commonAnnotations }}
+  annotations: {{ toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  serviceName: {{ include "tempo-monitor.fullname" $ }}-{{ $name }}-headless
+  replicas: 1
+  podManagementPolicy: Parallel
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: validator
+      app.kubernetes.io/name: {{ $name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: validator
+        app.kubernetes.io/name: {{ $name }}
+        pyroscope.agent.enabled: "true"
+        pyroscope.service: {{ $name }}
+        pyroscope.exporter: eBPF
+      {{- include "tempo-monitor.labels" $ | nindent 8 }}
+    spec:
+      {{- if $.Values.validators.nodeSelector }}
+      nodeSelector: {{ toYaml $.Values.validators.nodeSelector | nindent 8 }}
+      {{- end }}
+      {{- with $.Values.validators.tolerations }}
+      tolerations: {{ toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $.Values.validators.affinity }}
+      affinity: {{ toYaml . | nindent 8 }}
+      {{- end }}
+      terminationGracePeriodSeconds: 30
+      initContainers:
+        - name: init
+          image: {{ $tempoImage }}
+          imagePullPolicy: {{ $.Values.tempo.pullPolicy }}
+          command: ["sh", "-c", "echo 'Validator {{ $name }} ready'"]
+          resources: {{ toYaml (dict "requests" (dict "cpu" "10m" "memory" "16Mi") "limits" (dict "memory" "32Mi")) | nindent 12 }}
+      containers:
+        - name: tempo
+          image: {{ $tempoImage }}
+          imagePullPolicy: {{ $.Values.tempo.pullPolicy }}
+          ports:
+            - name: http-rpc
+              containerPort: {{ $.Values.tempo.rpc.port }}
+              protocol: TCP
+            - name: ws-rpc
+              containerPort: {{ $.Values.tempo.ws.port }}
+              protocol: TCP
+            - name: metrics-exec
+              containerPort: {{ $executionMetricsPort }}
+              protocol: TCP
+            - name: metrics-cons
+              containerPort: {{ $consensusPort }}
+              protocol: TCP
+            - name: consensus
+              containerPort: {{ $.Values.tempo.consensus.listenPort }}
+              protocol: TCP
+          env:
+            - name: RUST_LOG
+              value: {{ $.Values.tempo.rustLog }}
+          args:
+            - node
+            - --chain
+            - /tmp/genesis.json
+            - --datadir
+            - /tmp/data
+            - --port
+            - "30303"
+            - --http
+            - --http.addr
+            - "0.0.0.0"
+            - --http.port
+            - {{ printf "%d" $.Values.tempo.rpc.port | quote }}
+            - --http.api
+            - all
+            - --ws
+            - --ws.addr
+            - "0.0.0.0"
+            - --ws.port
+            - {{ printf "%d" $.Values.tempo.ws.port | quote }}
+            - --ws.api
+            - all
+            - --metrics
+            - {{ printf "0.0.0.0:%d" $executionMetricsPort | quote }}
+            - --consensus.signing-key
+            - /tmp/signing-key
+            - --consensus.signing-share
+            - /tmp/signing-share
+            - --consensus.listen-address
+            - {{ printf "0.0.0.0:%d" $.Values.tempo.consensus.listenPort | quote }}
+            - --consensus.metrics-address
+            - {{ printf "0.0.0.0:%d" $consensusPort | quote }}
+            - --consensus.datadir
+            - /tmp/consensus
+            - --consensus.fee-recipient
+            - {{ $.Values.tempo.feeRecipient }}
+            - --consensus.allow-private-ips
+            - --consensus.bypass-ip-check
+            - --consensus.allow-dns
+            - --consensus.wait-for-peer-response
+            - "2s"
+            - --consensus.wait-for-notarizations
+            - "2s"
+            - --consensus.wait-for-proposal
+            - "1200ms"
+            - --consensus.time-to-build-proposal
+            - "450ms"
+            - --consensus.wait-to-rebroadcast-nullify
+            - "10s"
+            - --consensus.time-to-build-subblock
+            - "100ms"
+            {{- if $.Values.tempo.otlp.enabled }}
+            - --logs-otlp={{ $.Values.tempo.otlp.endpoint }}/v1/logs
+            - --logs-otlp.filter={{ $.Values.tempo.otlp.logFilter }}
+            - --tracing-otlp={{ $.Values.tempo.otlp.endpoint }}/v1/traces
+            - --tracing-otlp.filter={{ $.Values.tempo.otlp.logFilter }}
+            - --tracing-otlp.sample-ratio={{ $.Values.tempo.otlp.traceSampleRatio }}
+            {{- end }}
+          {{- with $.Values.validators.resources }}
+          resources: {{ toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $.Values.securityContext }}
+          securityContext: {{ toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: genesis
+              mountPath: /tmp/genesis.json
+              subPath: genesis.json
+              readOnly: true
+            {{- if $signingKey }}
+            - name: signing-key
+              mountPath: /tmp/signing-key
+              subPath: signing.key
+              readOnly: true
+            {{- else }}
+            - name: signing-key
+              mountPath: /tmp/signing-key
+              readOnly: true
+            {{- end }}
+            {{- if $signingShare }}
+            - name: signing-share
+              mountPath: /tmp/signing-share
+              subPath: signing.share
+              readOnly: true
+            {{- else }}
+            - name: signing-share
+              mountPath: /tmp/signing-share
+              readOnly: true
+            {{- end }}
+            - name: data
+              mountPath: /tmp/data
+            - name: consensus-data
+              mountPath: /tmp/consensus
+      volumes:
+        - name: genesis
+          secret:
+            secretName: {{ include "tempo-monitor.fullname" $ }}-genesis
+        {{- if $signingKey }}
+        - name: signing-key
+          secret:
+            secretName: {{ include "tempo-monitor.fullname" $ }}-validator-signing-key-{{ $i }}
+        {{- else if $.Values.tempo.signingKeyExistingSecret }}
+        - name: signing-key
+          secret:
+            secretName: {{ $.Values.tempo.signingKeyExistingSecret }}
+        {{- else }}
+        - name: signing-key
+          secret:
+            secretName: {{ include "tempo-monitor.fullname" $ }}-validator-signing-key-{{ $i }}
+        {{- end }}
+        {{- if $signingShare }}
+        - name: signing-share
+          secret:
+            secretName: {{ include "tempo-monitor.fullname" $ }}-validator-signing-share-{{ $i }}
+        {{- else if $.Values.tempo.signingShareExistingSecret }}
+        - name: signing-share
+          secret:
+            secretName: {{ $.Values.tempo.signingShareExistingSecret }}
+        {{- else }}
+        - name: signing-share
+          secret:
+            secretName: {{ include "tempo-monitor.fullname" $ }}-validator-signing-share-{{ $i }}
+        {{- end }}
+  {{- if $.Values.validators.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: {{ $.Values.validators.persistence.storageClass | default "" | quote }}
+        resources:
+          requests:
+            storage: {{ $.Values.validators.persistence.dataSize }}
+    - metadata:
+        name: consensus-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: {{ $.Values.validators.persistence.storageClass | default "" | quote }}
+        resources:
+          requests:
+            storage: {{ $.Values.validators.persistence.consensusDataSize }}
+  {{- else }}
+        - name: data
+          emptyDir: {}
+        - name: consensus-data
+          emptyDir: {}
+  {{- end }}
+{{- end }}
+
+{{- end }}{{/* end profile guard */}}

@@ -1,0 +1,16 @@
+{{- $root := . }}
+{{- $profile := .Values.profile }}
+{{- if or (eq $profile "consensus") (eq $profile "full") }}
+# ConfigMap containing the healthcheck.py script injected as a volume.
+# Mounted by every RPC follower pod at /healthcheck.py.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "tempo-monitor.fullname" $root }}-healthcheck-script
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    app.kubernetes.io/component: rpc-health
+    {{- include "tempo-monitor.labels" $root | nindent 4 }}
+binaryData:
+  healthcheck.py: {{ .Files.Get "files/healthcheck.py" | b64enc }}
+{{- end }}{{/* end profile guard */}}
