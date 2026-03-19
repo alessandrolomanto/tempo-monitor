@@ -214,9 +214,21 @@ services:
 
   # ── Per-RPC-node health-check sidecars ─────────────────────────────
   # Each sidecar exposes GET /health which Traefik uses for load-
-  # balancer health checks.  rpc-0-health has no leader (self-referential)
-  # so it only checks eth_syncing; rpc-1-health also compares its block
-  # height against rpc-0 and marks itself 503 when lagging.
+  # balancer health checks.
+  #
+  # Logic (timestamp-based, not block-height):
+  #   rpc-0-health : healthy if local block.timestamp + MAX_AGE_SECS >= now
+  #   rpc-1-health : healthy if local block.timestamp + MAX_AGE_SECS >= now
+  #                  AND leader block.timestamp − local block.timestamp <= MAX_DRIFT_SECS
+  #
+  # Env vars:
+  #   RPC_URL          JSON-RPC endpoint of the node to check
+  #   LEADER_URL       JSON-RPC endpoint of the reference node (only for rpc-1-health)
+  #   MAX_AGE_SECS     Block is stale if now − timestamp > MAX_AGE_SECS  (default 30)
+  #   MAX_DRIFT_SECS   Follower is lagging if leader − local > MAX_DRIFT_SECS (default 30)
+  #   HEALTH_PORT      Port for the HTTP health server (default 8080)
+  # ─────────────────────────────────────────────────────────────────────
+
   rpc-0-health:
     image: python:3.12-slim
     container_name: tempo-rpc-0-health
@@ -224,33 +236,47 @@ services:
     restart: unless-stopped
     command: >
       python -c "
-      import urllib.request, json, os, http.server, socketserver, threading
+      import urllib.request, json, os, time, http.server, socketserver
 
-      RPC_URL  = os.environ.get('RPC_URL',   'http://localhost:8545')
-      HEALTH_PORT = int(os.environ.get('HEALTH_PORT', '8080'))
-      MAX_DIFF = int(os.environ.get('MAX_BLOCK_DIFF',  '5'))
+      RPC_URL      = os.environ.get('RPC_URL',       'http://localhost:8545')
+      MAX_AGE_SECS = int(os.environ.get('MAX_AGE_SECS',  '30'))
+      HEALTH_PORT  = int(os.environ.get('HEALTH_PORT',   '8080'))
 
       def rpc(method, params=None):
           try:
               req = urllib.request.Request(
-                  RPC_URL, data=json.dumps({'jsonrpc':'2.0','id':1,'method':method,'params':params or []}).encode(),
-                  headers={'Content-Type':'application/json'}, method='POST')
+                  RPC_URL,
+                  data=json.dumps({'jsonrpc':'2.0','id':1,'method':method,'params':params or []}).encode(),
+                  headers={'Content-Type':'application/json'},
+                  method='POST')
               with urllib.request.urlopen(req, timeout=10) as r:
                   return json.loads(r.read()).get('result')
           except Exception:
               return None
 
+      def block_age_seconds():
+          '''Return now - latest_block.timestamp, or None if unreachable.'''
+          result = rpc('eth_getBlockByNumber', ['latest', False])
+          if not result or 'timestamp' not in result:
+              return None
+          block_ts = int(result['timestamp'], 16)
+          return time.time() - block_ts
+
       class H(http.server.BaseHTTPRequestHandler):
           def do_GET(self):
               if self.path != '/health':
                   self.send_error(404); return
-              syncing = rpc('eth_syncing')
-              if syncing is False:
-                  self.send_response(200); self.send_header('Content-Type','text/plain'); self.end_headers()
-                  self.wfile.write(b'OK')
-              else:
-                  self.send_response(503); self.send_header('Content-Type','text/plain'); self.end_headers()
+              age = block_age_seconds()
+              if age is None or age > MAX_AGE_SECS:
+                  self.send_response(503)
+                  self.send_header('Content-Type', 'text/plain')
+                  self.end_headers()
                   self.wfile.write(b'UNHEALTHY')
+              else:
+                  self.send_response(200)
+                  self.send_header('Content-Type', 'text/plain')
+                  self.end_headers()
+                  self.wfile.write(b'OK')
           def log_message(self, *args): pass
 
       socketserver.ThreadingMixIn.daemon_threads = True
@@ -258,8 +284,8 @@ services:
       "
     environment:
       - RPC_URL=http://tempo-rpc-0:8545
+      - MAX_AGE_SECS=30
       - HEALTH_PORT=8080
-      - MAX_BLOCK_DIFF=5
     networks:
       default:
         ipv4_address: 10.0.0.12
@@ -273,43 +299,63 @@ services:
     restart: unless-stopped
     command: >
       python -c "
-      import urllib.request, json, os, http.server, socketserver
+      import urllib.request, json, os, time, http.server, socketserver
 
-      RPC_URL     = os.environ.get('RPC_URL',     'http://localhost:8545')
-      LEADER_URL  = os.environ.get('LEADER_URL',  'http://tempo-validator-0:8545')
-      HEALTH_PORT = int(os.environ.get('HEALTH_PORT', '8080'))
-      MAX_DIFF    = int(os.environ.get('MAX_BLOCK_DIFF',  '5'))
+      RPC_URL       = os.environ.get('RPC_URL',        'http://localhost:8545')
+      LEADER_URL    = os.environ.get('LEADER_URL',     'http://tempo-validator-0:8545')
+      MAX_AGE_SECS  = int(os.environ.get('MAX_AGE_SECS',   '30'))
+      MAX_DRIFT_SECS= int(os.environ.get('MAX_DRIFT_SECS','30'))
+      HEALTH_PORT   = int(os.environ.get('HEALTH_PORT',    '8080'))
 
       def rpc(method, url, params=None):
           try:
               req = urllib.request.Request(
-                  url, data=json.dumps({'jsonrpc':'2.0','id':1,'method':method,'params':params or []}).encode(),
-                  headers={'Content-Type':'application/json'}, method='POST')
+                  url,
+                  data=json.dumps({'jsonrpc':'2.0','id':1,'method':method,'params':params or []}).encode(),
+                  headers={'Content-Type':'application/json'},
+                  method='POST')
               with urllib.request.urlopen(req, timeout=10) as r:
                   return json.loads(r.read()).get('result')
           except Exception:
               return None
 
-      def block_height(url):
-          h = rpc('eth_blockNumber', url)
-          return int(h, 16) if h else None
+      def latest_block(url):
+          result = rpc('eth_getBlockByNumber', url, ['latest', False])
+          if not result or 'timestamp' not in result:
+              return None
+          return int(result['timestamp'], 16)
+
+      def health_status():
+          '''Returns (ok, reason) — ok=True means 200, ok=False means 503.'''
+          # Check local freshness
+          local_ts = latest_block(RPC_URL)
+          if local_ts is None:
+              return False, 'local_unreachable'
+          if time.time() - local_ts > MAX_AGE_SECS:
+              return False, f'local_stale ({time.time() - local_ts:.0f}s old)'
+
+          # Check drift against leader
+          leader_ts = latest_block(LEADER_URL)
+          if leader_ts is None:
+              # Leader unreachable — don't penalise follower
+              return True, 'leader_unreachable'
+          drift = leader_ts - local_ts
+          if drift > MAX_DRIFT_SECS:
+              return False, f'drift_too_large ({drift:.0f}s)'
+          return True, f'ok (drift={drift:.0f}s)'
 
       class H(http.server.BaseHTTPRequestHandler):
           def do_GET(self):
               if self.path != '/health':
                   self.send_error(404); return
-              syncing = rpc('eth_syncing', RPC_URL)
-              if syncing is False:
-                  self.send_response(200); self.send_header('Content-Type','text/plain'); self.end_headers()
-                  self.wfile.write(b'OK'); return
-              local  = block_height(RPC_URL)
-              leader = block_height(LEADER_URL)
-              if local is None or (leader is not None and leader - local > MAX_DIFF):
-                  self.send_response(503); self.send_header('Content-Type','text/plain'); self.end_headers()
-                  self.wfile.write(b'UNHEALTHY')
+              ok, reason = health_status()
+              if ok:
+                  self.send_response(200)
               else:
-                  self.send_response(200); self.send_header('Content-Type','text/plain'); self.end_headers()
-                  self.wfile.write(b'OK')
+                  self.send_response(503)
+              self.send_header('Content-Type', 'text/plain')
+              self.end_headers()
+              self.wfile.write(reason.encode())
           def log_message(self, *args): pass
 
       socketserver.ThreadingMixIn.daemon_threads = True
@@ -318,8 +364,9 @@ services:
     environment:
       - RPC_URL=http://tempo-rpc-1:8545
       - LEADER_URL=http://tempo-validator-0:8545
+      - MAX_AGE_SECS=30
+      - MAX_DRIFT_SECS=30
       - HEALTH_PORT=8080
-      - MAX_BLOCK_DIFF=5
     networks:
       default:
         ipv4_address: 10.0.0.13
