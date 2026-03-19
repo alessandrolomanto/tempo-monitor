@@ -61,7 +61,7 @@ spec:
               containerPort: {{ $.Values.tempo.execution.metricsPort }}
           env:
             - name: RUST_LOG
-              value: {{ $.Values.tempo.rustLog }}
+              value: {{ $.Values.tempo.rustLog | quote }}
           args:
             - node
             - --chain
@@ -111,13 +111,13 @@ spec:
               containerPort: 8080
           env:
             - name: RPC_URL
-              value: {{ printf "http://localhost:%d" $rpcPort }}
+              value: {{ printf "http://localhost:%d" $rpcPort | toJson }}
             - name: LEADER_URL
-              value: {{ printf "http://%s:%d" $healthLeaderHost $rpcPort }}
+              value: {{ printf "http://%s:%d" $healthLeaderHost $rpcPort | toJson }}
             - name: MAX_AGE_SECS
-              value: {{ printf "%d" $healthMaxAge }}
+              value: {{ $healthMaxAge | toJson }}
             - name: MAX_DRIFT_SECS
-              value: {{ printf "%d" $healthMaxDrift }}
+              value: {{ $healthMaxDrift | toJson }}
             - name: HEALTH_PORT
               value: "8080"
           volumeMounts:

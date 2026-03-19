@@ -62,7 +62,7 @@ spec:
               containerPort: {{ $root.Values.tempo.execution.metricsPort }}
           env:
             - name: RUST_LOG
-              value: {{ $root.Values.tempo.rustLog }}
+              value: {{ $root.Values.tempo.rustLog | quote }}
           args:
             - node
             - --chain

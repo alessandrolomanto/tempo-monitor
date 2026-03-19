@@ -89,7 +89,7 @@ spec:
               protocol: TCP
           env:
             - name: RUST_LOG
-              value: {{ $.Values.tempo.rustLog }}
+              value: {{ $.Values.tempo.rustLog | quote }}
           args:
             - node
             - --chain
@@ -97,10 +97,10 @@ spec:
             - --datadir
             - /tmp/data
             - --port
-            - "30303"
+            - 30303
             - --http
             - --http.addr
-            - "0.0.0.0"
+            - 0.0.0.0 | quote }}
             - --http.port
             - {{ printf "%d" $.Values.tempo.rpc.port | quote }}
             - --http.api

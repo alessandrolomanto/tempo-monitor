@@ -47,7 +47,7 @@ spec:
               containerPort: 3000
           env:
             - name: GF_SECURITY_ADMIN_USER
-              value: {{ .Values.monitoring.grafana.adminUser }}
+              value: {{ .Values.monitoring.grafana.adminUser | quote }}
             {{- if .Values.monitoring.grafana.existingSecret }}
             - name: GF_SECURITY_ADMIN_PASSWORD
               valueFrom:
@@ -56,12 +56,12 @@ spec:
                   key: password
             {{- else }}
             - name: GF_SECURITY_ADMIN_PASSWORD
-              value: {{ .Values.monitoring.grafana.adminPassword | default "admin" }}
+              value: {{ .Values.monitoring.grafana.adminPassword | default "admin" | quote }}
             {{- end }}
             - name: GF_AUTH_ANONYMOUS_ENABLED
-              value: {{ if .Values.monitoring.grafana.anonymous.enabled }}"true"{{ else }}"false"{{ end }}
+              value: {{ .Values.monitoring.grafana.anonymous.enabled | quote }}
             - name: GF_AUTH_ANONYMOUS_ORG_ROLE
-              value: {{ .Values.monitoring.grafana.anonymous.orgRole }}
+              value: {{ .Values.monitoring.grafana.anonymous.orgRole | quote }}
           volumeMounts:
             - name: provisioning
               mountPath: /etc/grafana/provisioning
