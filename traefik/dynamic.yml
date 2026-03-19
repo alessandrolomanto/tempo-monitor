@@ -1,4 +1,5 @@
 http:
+  # ── Routers ─────────────────────────────────────────────────────────
   routers:
     rpc:
       entryPoints: [rpc]
@@ -18,12 +19,24 @@ http:
       service: rpc
       priority: 1
 
+  # ── Services ────────────────────────────────────────────────────────
   services:
     rpc:
+      # The health-check sidecars act as reverse proxies:
+      #   GET /health  →  responded locally (timestamp-based check)
+      #   *   /*       →  proxied to the real RPC node
+      # Unhealthy backends are excluded from the pool automatically.
       loadBalancer:
+        healthCheck:
+          path: /health
+          interval: 10s
+          timeout:  5s
+          followRedirects: true
+          headers:
+            Host: ""
         servers:
-          - url: "http://tempo-rpc-0:8545"
-          - url: "http://tempo-rpc-1:8545"
+          - url: "http://tempo-rpc-0-health:8080"
+          - url: "http://tempo-rpc-1-health:8080"
 
     faucet:
       loadBalancer:

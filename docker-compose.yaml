@@ -21,6 +21,13 @@ x-validator: &validator-defaults
     - "8545"
     - --http.api
     - all
+    - --ws
+    - --ws.addr
+    - "0.0.0.0"
+    - --ws.port
+    - "8546"
+    - --ws.api
+    - all
     - --metrics
     - "0.0.0.0:9001"
     - --consensus.signing-key
@@ -39,15 +46,15 @@ x-validator: &validator-defaults
     - --consensus.bypass-ip-check
     - --consensus.allow-dns
     - --consensus.wait-for-peer-response
-    - "1000ms"
+    - "2s"
     - --consensus.wait-for-notarizations
-    - "1000ms"
+    - "2s"
     - --consensus.wait-for-proposal
-    - "1000ms"
+    - "1200ms"
     - --consensus.time-to-build-proposal
-    - "100ms"
+    - "450ms"
     - --consensus.wait-to-rebroadcast-nullify
-    - "3s"
+    - "10s"
     - --consensus.time-to-build-subblock
     - "100ms"
     - --logs-otlp=http://alloy:4318/v1/logs
@@ -158,7 +165,7 @@ services:
       - --datadir
       - /tmp/data
       - --follow
-      - "http://10.0.0.1:8545"
+      - "ws://10.0.0.1:8546"
       - --http
       - --http.addr
       - "0.0.0.0"
@@ -196,7 +203,7 @@ services:
       - --datadir
       - /tmp/data
       - --follow
-      - "http://10.0.0.2:8545"
+      - "ws://10.0.0.2:8546"
       - --http
       - --http.addr
       - "0.0.0.0"
@@ -212,7 +219,64 @@ services:
       - --tracing-otlp.filter=${LOG_LEVEL:-info,reth=debug}
       - --tracing-otlp.sample-ratio=${TRACE_SAMPLE_RATIO:-1.0}
 
-  # ── Faucet node (follow-mode with built-in faucet RPC) ───────────────
+  # ── Per-RPC-node health-check sidecars ─────────────────────────────
+  # Timestamp-based health checks (see scripts/healthcheck.py).
+  # Logic:
+  #   rpc-0-health : healthy if now − block.timestamp <= MAX_AGE_SECS
+  #   rpc-1-health : healthy if now − block.timestamp <= MAX_AGE_SECS
+  #                  AND validator-0.timestamp − local.timestamp <= MAX_DRIFT_SECS
+  #
+  # Env vars (all configurable):
+  #   RPC_URL         JSON-RPC endpoint of the node to check
+  #   LEADER_URL      Reference node for drift check (default: none — stale only)
+  #   MAX_AGE_SECS    Stale threshold (default: 30s)
+  #   MAX_DRIFT_SECS  Follower drift threshold vs leader (default: 30s)
+  #   HEALTH_PORT     HTTP server port (default: 8080)
+  # ─────────────────────────────────────────────────────────────────────
+
+  rpc-0-health:
+    image: python:3.12-slim
+    container_name: tempo-rpc-0-health
+    profiles: [consensus]
+    restart: unless-stopped
+    volumes:
+      - ./scripts/healthcheck.py:/healthcheck.py:ro
+    working_dir: /
+    command: ["python", "/healthcheck.py"]
+    environment:
+      - RPC_URL=http://tempo-rpc-0:8545
+      - MAX_AGE_SECS=30
+      - MAX_DRIFT_SECS=30
+      - HEALTH_PORT=8080
+    networks:
+      default:
+        ipv4_address: 10.0.0.12
+    depends_on:
+      - rpc-0
+
+  rpc-1-health:
+    image: python:3.12-slim
+    container_name: tempo-rpc-1-health
+    profiles: [consensus]
+    restart: unless-stopped
+    volumes:
+      - ./scripts/healthcheck.py:/healthcheck.py:ro
+    working_dir: /
+    command: ["python", "/healthcheck.py"]
+    environment:
+      - RPC_URL=http://tempo-rpc-1:8545
+      - LEADER_URL=http://tempo-validator-0:8545
+      - MAX_AGE_SECS=30
+      - MAX_DRIFT_SECS=30
+      - HEALTH_PORT=8080
+    networks:
+      default:
+        ipv4_address: 10.0.0.13
+    depends_on:
+      - rpc-1
+      - validator-0
+
+  # ── Faucet node (follow-mode with built-in faucet RPC) ────────────────
   faucet:
     <<: *rpc-defaults
     container_name: tempo-faucet
@@ -237,7 +301,7 @@ services:
       - --datadir
       - /tmp/data
       - --follow
-      - "http://10.0.0.3:8545"
+      - "ws://10.0.0.3:8546"
       - --http
       - --http.addr
       - "0.0.0.0"
@@ -363,7 +427,7 @@ services:
         ipv4_address: 10.0.0.33
     restart: unless-stopped
 
-  # ── Loki (log aggregation) ───────────────────────────────────────────
+  # ── Loki (log aggregation) ────────────────────────────────────────────
   loki:
     image: grafana/loki:3.4.3
     profiles: [monitoring]
