@@ -22,10 +22,10 @@ http:
   # ── Services ────────────────────────────────────────────────────────
   services:
     rpc:
-      # Traefik health-checks tempo-rpc-0-health / tempo-rpc-1-health
-      # (the sidecars). Unhealthy backends are marked DOWN and excluded
-      # from the pool automatically.
-      # Actual RPC client traffic is routed to the REAL RPC nodes only.
+      # The health-check sidecars act as reverse proxies:
+      #   GET /health  →  responded locally (timestamp-based check)
+      #   *   /*       →  proxied to the real RPC node
+      # Unhealthy backends are excluded from the pool automatically.
       loadBalancer:
         healthCheck:
           path: /health
@@ -35,8 +35,8 @@ http:
           headers:
             Host: ""
         servers:
-          - url: "http://tempo-rpc-0:8545"
-          - url: "http://tempo-rpc-1:8545"
+          - url: "http://tempo-rpc-0-health:8080"
+          - url: "http://tempo-rpc-1-health:8080"
 
     faucet:
       loadBalancer:

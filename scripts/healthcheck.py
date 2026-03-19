@@ -1,15 +1,22 @@
 #!/usr/bin/env python3
 """
-Timestamp-based health-check server for tempo-monitor RPC sidecars.
-Reads configuration from environment variables (no args needed at runtime).
-"""
-import json, os, time, http.server, socketserver, urllib.request
+Health-check + reverse-proxy sidecar for tempo-monitor RPC nodes.
 
-RPC_URL        = os.environ.get("RPC_URL",         "http://localhost:8545")
-LEADER_URL     = os.environ.get("LEADER_URL",      "")
-MAX_AGE_SECS   = int(os.environ.get("MAX_AGE_SECS",    "30"))
-MAX_DRIFT_SECS = int(os.environ.get("MAX_DRIFT_SECS",  "30"))
-HEALTH_PORT    = int(os.environ.get("HEALTH_PORT",     "8080"))
+GET  /health  →  timestamp-based health check (responded locally)
+*    /*       →  reverse-proxied to the real RPC node (RPC_URL)
+
+This allows Traefik to use the sidecar as both a health-check target and
+the backend for client traffic.
+"""
+import json, os, time, http.server, socketserver, urllib.request, urllib.error
+
+RPC_URL        = os.environ.get("RPC_URL",        "http://localhost:8545")
+LEADER_URL     = os.environ.get("LEADER_URL",     "")
+MAX_AGE_SECS   = int(os.environ.get("MAX_AGE_SECS",   "30"))
+MAX_DRIFT_SECS = int(os.environ.get("MAX_DRIFT_SECS", "30"))
+HEALTH_PORT    = int(os.environ.get("HEALTH_PORT",    "8080"))
+
+PROXY_HEADERS_DROP = frozenset(("host", "transfer-encoding"))
 
 def rpc(method, url, params=None):
     try:
@@ -49,13 +56,59 @@ def check():
 
 class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
-        if self.path != "/health":
-            self.send_error(404); return
+        if self.path == "/health":
+            self._handle_health()
+        else:
+            self._proxy()
+
+    def do_POST(self):
+        self._proxy()
+
+    def do_OPTIONS(self):
+        self._proxy()
+
+    def _handle_health(self):
         ok, reason = check()
         self.send_response(200 if ok else 503)
         self.send_header("Content-Type", "text/plain; charset=utf-8")
         self.end_headers()
         self.wfile.write(reason.encode("utf-8"))
+
+    def _proxy(self):
+        length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(length) if length else None
+
+        headers = {
+            k: v for k, v in self.headers.items()
+            if k.lower() not in PROXY_HEADERS_DROP
+        }
+
+        req = urllib.request.Request(
+            RPC_URL + self.path,
+            data=body,
+            headers=headers,
+            method=self.command,
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                resp_body = resp.read()
+                self.send_response(resp.status)
+                for k, v in resp.getheaders():
+                    if k.lower() not in ("transfer-encoding", "connection"):
+                        self.send_header(k, v)
+                self.end_headers()
+                self.wfile.write(resp_body)
+        except urllib.error.HTTPError as e:
+            resp_body = e.read()
+            self.send_response(e.code)
+            for k, v in e.headers.items():
+                if k.lower() not in ("transfer-encoding", "connection"):
+                    self.send_header(k, v)
+            self.end_headers()
+            self.wfile.write(resp_body)
+        except Exception:
+            self.send_error(502, "Bad Gateway")
+
     def log_message(self, *args): pass
 
 class Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
@@ -64,5 +117,10 @@ class Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
 
 if __name__ == "__main__":
     s = Server(("0.0.0.0", HEALTH_PORT), Handler)
-    print(f"Listening 0.0.0.0:{HEALTH_PORT}  RPC={RPC_URL}  LEADER={LEADER_URL or '-'}  MAX_AGE={MAX_AGE_SECS}s  MAX_DRIFT={MAX_DRIFT_SECS}s", flush=True)
+    print(
+        f"Listening 0.0.0.0:{HEALTH_PORT}  RPC={RPC_URL}  "
+        f"LEADER={LEADER_URL or '-'}  MAX_AGE={MAX_AGE_SECS}s  "
+        f"MAX_DRIFT={MAX_DRIFT_SECS}s",
+        flush=True,
+    )
     s.serve_forever()
