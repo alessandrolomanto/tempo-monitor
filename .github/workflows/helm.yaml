@@ -108,7 +108,7 @@ jobs:
 
       - id: meta
         run: |
-          VERSION=$(helm show chart ./helm/ | grep '^version:' | awk '{print $2}' | xargs)
+          VERSION=$(grep '^version:' helm/Chart.yaml | awk '{print $2}')
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
           echo "basename=tempo-monitor-${VERSION}.tgz" >> $GITHUB_OUTPUT
 
