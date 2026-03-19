@@ -15,7 +15,7 @@ up-restart:
 
 # Stop all services
 down:
-    docker compose --profile consensus --profile monitoring down 
+    docker compose --profile consensus --profile monitoring down
 
 # Stop all services with volumes
 down-v:
@@ -25,6 +25,11 @@ down-v:
 # Usage: just logs [validator-0|validator-1|rpc-0|rpc-1|traefik|alloy|...]
 logs service="validator-0":
     docker logs -f tempo-{{service}}
+
+# Tail health-check sidecar logs for rpc-0 or rpc-1
+# Usage: just logs-health [rpc-0|rpc-1]
+logs-health service="rpc-0":
+    docker logs -f tempo-{{service}}-health
 
 # Regenerate genesis and validator keys from the tempo repo
 generate-genesis:

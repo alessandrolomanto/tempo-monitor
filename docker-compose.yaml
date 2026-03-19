@@ -212,7 +212,122 @@ services:
       - --tracing-otlp.filter=${LOG_LEVEL:-info,reth=debug}
       - --tracing-otlp.sample-ratio=${TRACE_SAMPLE_RATIO:-1.0}
 
-  # ── Faucet node (follow-mode with built-in faucet RPC) ───────────────
+  # ── Per-RPC-node health-check sidecars ─────────────────────────────
+  # Each sidecar exposes GET /health which Traefik uses for load-
+  # balancer health checks.  rpc-0-health has no leader (self-referential)
+  # so it only checks eth_syncing; rpc-1-health also compares its block
+  # height against rpc-0 and marks itself 503 when lagging.
+  rpc-0-health:
+    image: python:3.12-slim
+    container_name: tempo-rpc-0-health
+    profiles: [consensus]
+    restart: unless-stopped
+    command: >
+      python -c "
+      import urllib.request, json, os, http.server, socketserver, threading
+
+      RPC_URL  = os.environ.get('RPC_URL',   'http://localhost:8545')
+      HEALTH_PORT = int(os.environ.get('HEALTH_PORT', '8080'))
+      MAX_DIFF = int(os.environ.get('MAX_BLOCK_DIFF',  '5'))
+
+      def rpc(method, params=None):
+          try:
+              req = urllib.request.Request(
+                  RPC_URL, data=json.dumps({'jsonrpc':'2.0','id':1,'method':method,'params':params or []}).encode(),
+                  headers={'Content-Type':'application/json'}, method='POST')
+              with urllib.request.urlopen(req, timeout=10) as r:
+                  return json.loads(r.read()).get('result')
+          except Exception:
+              return None
+
+      class H(http.server.BaseHTTPRequestHandler):
+          def do_GET(self):
+              if self.path != '/health':
+                  self.send_error(404); return
+              syncing = rpc('eth_syncing')
+              if syncing is False:
+                  self.send_response(200); self.send_header('Content-Type','text/plain'); self.end_headers()
+                  self.wfile.write(b'OK')
+              else:
+                  self.send_response(503); self.send_header('Content-Type','text/plain'); self.end_headers()
+                  self.wfile.write(b'UNHEALTHY')
+          def log_message(self, *args): pass
+
+      socketserver.ThreadingMixIn.daemon_threads = True
+      http.server.HTTPServer(('0.0.0.0', HEALTH_PORT), H).serve_forever()
+      "
+    environment:
+      - RPC_URL=http://tempo-rpc-0:8545
+      - HEALTH_PORT=8080
+      - MAX_BLOCK_DIFF=5
+    networks:
+      default:
+        ipv4_address: 10.0.0.12
+    depends_on:
+      - rpc-0
+
+  rpc-1-health:
+    image: python:3.12-slim
+    container_name: tempo-rpc-1-health
+    profiles: [consensus]
+    restart: unless-stopped
+    command: >
+      python -c "
+      import urllib.request, json, os, http.server, socketserver
+
+      RPC_URL     = os.environ.get('RPC_URL',     'http://localhost:8545')
+      LEADER_URL  = os.environ.get('LEADER_URL',  'http://tempo-validator-0:8545')
+      HEALTH_PORT = int(os.environ.get('HEALTH_PORT', '8080'))
+      MAX_DIFF    = int(os.environ.get('MAX_BLOCK_DIFF',  '5'))
+
+      def rpc(method, url, params=None):
+          try:
+              req = urllib.request.Request(
+                  url, data=json.dumps({'jsonrpc':'2.0','id':1,'method':method,'params':params or []}).encode(),
+                  headers={'Content-Type':'application/json'}, method='POST')
+              with urllib.request.urlopen(req, timeout=10) as r:
+                  return json.loads(r.read()).get('result')
+          except Exception:
+              return None
+
+      def block_height(url):
+          h = rpc('eth_blockNumber', url)
+          return int(h, 16) if h else None
+
+      class H(http.server.BaseHTTPRequestHandler):
+          def do_GET(self):
+              if self.path != '/health':
+                  self.send_error(404); return
+              syncing = rpc('eth_syncing', RPC_URL)
+              if syncing is False:
+                  self.send_response(200); self.send_header('Content-Type','text/plain'); self.end_headers()
+                  self.wfile.write(b'OK'); return
+              local  = block_height(RPC_URL)
+              leader = block_height(LEADER_URL)
+              if local is None or (leader is not None and leader - local > MAX_DIFF):
+                  self.send_response(503); self.send_header('Content-Type','text/plain'); self.end_headers()
+                  self.wfile.write(b'UNHEALTHY')
+              else:
+                  self.send_response(200); self.send_header('Content-Type','text/plain'); self.end_headers()
+                  self.wfile.write(b'OK')
+          def log_message(self, *args): pass
+
+      socketserver.ThreadingMixIn.daemon_threads = True
+      http.server.HTTPServer(('0.0.0.0', HEALTH_PORT), H).serve_forever()
+      "
+    environment:
+      - RPC_URL=http://tempo-rpc-1:8545
+      - LEADER_URL=http://tempo-validator-0:8545
+      - HEALTH_PORT=8080
+      - MAX_BLOCK_DIFF=5
+    networks:
+      default:
+        ipv4_address: 10.0.0.13
+    depends_on:
+      - rpc-1
+      - validator-0
+
+  # ── Faucet node (follow-mode with built-in faucet RPC) ────────────────
   faucet:
     <<: *rpc-defaults
     container_name: tempo-faucet
@@ -363,7 +478,7 @@ services:
         ipv4_address: 10.0.0.33
     restart: unless-stopped
 
-  # ── Loki (log aggregation) ───────────────────────────────────────────
+  # ── Loki (log aggregation) ────────────────────────────────────────────
   loki:
     image: grafana/loki:3.4.3
     profiles: [monitoring]

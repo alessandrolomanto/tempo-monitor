@@ -21,9 +21,17 @@ http:
   services:
     rpc:
       loadBalancer:
+        healthCheck:
+          path: /health
+          interval: 10s
+          timeout:  5s
+          # Traefik follows redirects; both health sidecars return plain 200/503
+          followRedirects: true
+          headers:
+            Host: ""
         servers:
-          - url: "http://tempo-rpc-0:8545"
-          - url: "http://tempo-rpc-1:8545"
+          - url: "http://tempo-rpc-0-health:8080"
+          - url: "http://tempo-rpc-1-health:8080"
 
     faucet:
       loadBalancer:
