@@ -9,6 +9,7 @@ nav:
   - Quick Start: index.md
   - Local DNS: local-dns.md
   - Interact with Chain: usage.md
+  - MPP Demo: mpp.md
   - Dashboards: dashboards.md
 
 theme:

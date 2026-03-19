@@ -1,0 +1,14 @@
+{
+  "name": "mpp-demo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun run server.ts",
+    "client": "bun run client.ts"
+  },
+  "dependencies": {
+    "hono": "^4",
+    "mppx": "^0.4",
+    "viem": "^2"
+  }
+}

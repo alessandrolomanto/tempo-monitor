@@ -412,6 +412,24 @@ services:
         ipv4_address: 10.0.0.36
     restart: unless-stopped
 
+  # ── MPP demo API (payment-gated endpoint) ────────────────────────────
+  mpp-demo:
+    build: ./mpp-demo
+    container_name: mpp-demo
+    profiles: [mpp]
+    restart: unless-stopped
+    ports:
+      - "3030:3030"
+    environment:
+      - RPC_URL=http://10.0.0.1:8545
+      - FEE_PAYER_KEY=${FAUCET_PRIVATE_KEY:-0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80}
+    depends_on:
+      validator-0:
+        condition: service_started
+    networks:
+      default:
+        ipv4_address: 10.0.0.40
+
 volumes:
   prometheus-data:
   tempo-data:

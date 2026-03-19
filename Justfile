@@ -54,6 +54,18 @@ health rpc_url="http://localhost:8545":
 status:
     docker compose --profile consensus --profile monitoring ps
 
+# Start consensus + MPP demo
+up-mpp:
+    docker compose --profile consensus --profile mpp up -d
+
+# Rebuild and restart MPP demo only
+restart-mpp:
+    docker compose --profile consensus --profile mpp up -d --build --force-recreate mpp-demo
+
+# Tail MPP demo logs
+logs-mpp:
+    docker logs -f mpp-demo
+
 # Serve docs locally with MkDocs (http://localhost:8000)
 docs:
     docker run --rm -p 8000:8000 -v {{justfile_directory()}}:/docs squidfunk/mkdocs-material

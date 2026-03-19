@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "mppx": {
+      "command": "npx",
+      "args": ["mppx", "--mcp"],
+      "env": {
+        "MPPX_PRIVATE_KEY": "0xbd31054b57fb32023108221c1b5e4d0e99715c599546ad4dd78ca6ea8b55d85e",
+        "MPPX_RPC_URL": "http://localhost:8545"
+      }
+    }
+  }
+}
