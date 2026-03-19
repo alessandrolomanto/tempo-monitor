@@ -28,7 +28,19 @@ Create a combined name for validator / RPC resources.
 Tempo image.
 */}}
 {{- define "tempo-monitor.image" -}}
-{{- printf "%s:%s" .Values.tempo.image.repository .Values.tempo.image.tag | default .Values.tempo.image }}
+{{- /*
+Handle two formats for tempo.image:
+  - String: "ghcr.io/tempoxyz/tempo:1.4.1"  (used in values.yaml)
+  - Struct: { repository: "...", tag: "...", pullPolicy: "..." }
+*/ -}}
+{{- $img := .Values.tempo.image -}}
+{{- if kindIs "string" $img }}
+{{-   $img -}}
+{{- else if $img.repository }}
+{{-   printf "%s:%s" $img.repository ($img.tag | default "latest") -}}
+{{- else }}
+{{-   $img | toString -}}
+{{- end }}
 {{- end }}
 
 {{/*
