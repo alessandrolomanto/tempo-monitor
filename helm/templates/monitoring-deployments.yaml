@@ -4,7 +4,7 @@
 
 {{- /* helper to build a PVC spec */ -}}
 
-# ── Prometheus ──────────────────────────────────────────────
+#  Prometheus 
 {{- if .Values.monitoring.persistence.prometheus.enabled }}
 {{- $pvc := dict "enabled" true "name" (printf "%s-prometheus" (include "tempo-monitor.fullname" .)) "component" "prometheus" "storageClass" .Values.monitoring.persistence.prometheus.storageClass "size" .Values.monitoring.persistence.prometheus.size -}}
 {{- include "tempo-monitor.pvc" (merge (dict "root" $root) $pvc) }}
@@ -62,7 +62,7 @@ spec:
         {{- end }}
 
 ---
-# ── Grafana Alloy ──────────────────────────────────────────
+#  Grafana Alloy 
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -126,7 +126,7 @@ spec:
             path: /sys/fs/cgroup
 
 ---
-# ── Grafana Tempo ─────────────────────────────────────────
+#  Grafana Tempo 
 {{- if .Values.monitoring.persistence.tempo.enabled }}
 {{- $pvc := dict "enabled" true "name" (printf "%s-grafana-tempo" (include "tempo-monitor.fullname" .)) "component" "grafana-tempo" "storageClass" .Values.monitoring.persistence.tempo.storageClass "size" .Values.monitoring.persistence.tempo.size -}}
 {{- include "tempo-monitor.pvc" (merge (dict "root" $root) $pvc) }}
@@ -188,7 +188,7 @@ spec:
         {{- end }}
 
 ---
-# ── Loki ──────────────────────────────────────────────────
+#  Loki 
 {{- if .Values.monitoring.persistence.loki.enabled }}
 {{- $pvc := dict "enabled" true "name" (printf "%s-loki" (include "tempo-monitor.fullname" .)) "component" "loki" "storageClass" .Values.monitoring.persistence.loki.storageClass "size" .Values.monitoring.persistence.loki.size -}}
 {{- include "tempo-monitor.pvc" (merge (dict "root" $root) $pvc) }}
@@ -246,7 +246,7 @@ spec:
         {{- end }}
 
 ---
-# ── Pyroscope ────────────────────────────────────────────
+#  Pyroscope 
 {{- if .Values.monitoring.persistence.pyroscope.enabled }}
 {{- $pvc := dict "enabled" true "name" (printf "%s-pyroscope" (include "tempo-monitor.fullname" .)) "component" "pyroscope" "storageClass" .Values.monitoring.persistence.pyroscope.storageClass "size" .Values.monitoring.persistence.pyroscope.size -}}
 {{- include "tempo-monitor.pvc" (merge (dict "root" $root) $pvc) }}

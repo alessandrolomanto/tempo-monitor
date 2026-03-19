@@ -20,7 +20,7 @@ env:
   OCI_REGISTRY: ghcr.io
 
 jobs:
-  # ── Lint ──────────────────────────────────────────────────────────────
+  #  Lint 
   lint:
     name: Lint Helm chart
     runs-on: ubuntu-latest
@@ -41,7 +41,7 @@ jobs:
         run: |
           helm lint --strict --set profile=full --set tempo.image=ghcr.io/tempoxyz/tempo:1.4.1 ./helm
 
-  # ── Validate (dry-run install) ────────────────────────────────────────
+  #  Validate (dry-run install) 
   validate:
     name: Validate Kubernetes install (dry-run)
     runs-on: ubuntu-latest
@@ -84,7 +84,7 @@ jobs:
             --set monitoring.enabled=true \
             --debug --dry-run=server 2>&1 | head -200
 
-  # ── Package ─────────────────────────────────────────────────────────
+  #  Package 
   package:
     name: Package Helm chart
     runs-on: ubuntu-latest
@@ -124,7 +124,7 @@ jobs:
           path: /tmp/helm-charts/${{ steps.meta.outputs.chart_basename }}
           retention-days: 5
 
-  # ── Publish to GHCR (on main / release only) ──────────────────────────
+  #  Publish to GHCR (on main / release only) 
   publish:
     name: Publish Helm chart to GHCR
     runs-on: ubuntu-latest
@@ -177,7 +177,7 @@ jobs:
           echo "Published: ${CHART_REF}:${VERSION}"
           echo "Published: ${CHART_REF}:latest"
 
-  # ── SLSA provenance ─────────────────────────────────────────────────
+  #  SLSA provenance 
   provenance:
     name: Generate SLSA provenance
     runs-on: ubuntu-latest

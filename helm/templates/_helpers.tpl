@@ -44,7 +44,7 @@ Handle two formats for tempo.image:
 {{- end }}
 
 {{/*
-Tempo consensus network seed — first validator address.
+Tempo consensus network seed  first validator address.
 */}}
 {{- define "tempo-monitor.leaderAddress" -}}
 {{- index .Values.validators.hosts 0 | printf "http://%s:8545" }}

@@ -46,7 +46,7 @@ groups:
             The node has fewer than 5 connected peers for more than 5 minutes.
             Block propagation and transaction gossip may be degraded.
 
-      # ── Block height stalled ────────────────────────────────────────────
+      #  Block height stalled 
       - uid: tempo-node-not-syncing
         title: NodeNotSyncing
         condition: C
@@ -88,7 +88,7 @@ groups:
             The node may have lost consensus connectivity or the block
             production pipeline is stuck.
 
-      # ── RPC latency too high ────────────────────────────────────────────
+      #  RPC latency too high 
       - uid: tempo-rpc-latency-high
         title: RPCLatencyHigh
         condition: C
@@ -129,7 +129,7 @@ groups:
             High RPC latency indicates the node is under heavy load
             or the state trie is contended.
 
-      # ── Metrics endpoint unreachable ────────────────────────────────────
+      #  Metrics endpoint unreachable 
       - uid: tempo-metrics-unreachable
         title: MetricsUnreachable
         condition: C
@@ -170,7 +170,7 @@ groups:
             Alloy cannot scrape the node. The process may have crashed
             or the metrics port is blocked.
 
-      # ── Memory usage too high ───────────────────────────────────────────
+      #  Memory usage too high 
       - uid: tempo-high-memory
         title: HighMemoryUsage
         condition: C
@@ -190,7 +190,7 @@ groups:
               expression: A
               reducer: last
               refId: B
-          # 3.4e9 bytes ≈ 85% of 4 GiB — adjust to match your host
+          # 3.4e9 bytes  85% of 4 GiB  adjust to match your host
           - refId: C
             datasourceUid: __expr__
             model:

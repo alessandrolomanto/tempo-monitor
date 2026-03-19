@@ -50,7 +50,7 @@ spec:
       {{- end }}
       terminationGracePeriodSeconds: 30
       containers:
-        # ── Tempo RPC follower ──────────────────────────────────────────
+        #  Tempo RPC follower 
         - name: tempo
           image: {{ $tempoImage }}
           imagePullPolicy: {{ $.Values.tempo.pullPolicy }}
@@ -100,9 +100,9 @@ spec:
             - name: data
               mountPath: /tmp/data
 
-        # ── Health-check + transparent HTTP proxy sidecar ───────────────
-        # GET  /health  →  timestamp-based health check (no proxy)
-        # *    /*       →  transparent proxy to local RPC (traffic from Traefik)
+        #  Health-check + transparent HTTP proxy sidecar 
+        # GET  /health    timestamp-based health check (no proxy)
+        # *    /*         transparent proxy to local RPC (traffic from Traefik)
         - name: healthcheck
           image: python:3.12-slim
           imagePullPolicy: IfNotPresent

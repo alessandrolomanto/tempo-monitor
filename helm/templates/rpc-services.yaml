@@ -31,7 +31,7 @@ spec:
 
 ---
 # Health-check sidecar for this RPC node.
-# Exposes GET /health → 200 if synced, 503 if lagging.
+# Exposes GET /health  200 if synced, 503 if lagging.
 # Also acts as a transparent HTTP proxy for all other requests so
 # Traefik can point its backend at this sidecar.
 apiVersion: v1
