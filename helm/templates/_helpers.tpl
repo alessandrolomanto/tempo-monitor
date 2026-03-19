@@ -84,3 +84,39 @@ WS RPC port.
 {{- define "tempo-monitor.wsPort" -}}
 {{- .Values.tempo.rpc.wsPort | default 8546 }}
 {{- end }}
+
+{{/*
+Build a PersistentVolumeClaim manifest.
+
+Call with:
+  include "tempo-monitor.pvc" (dict
+    "root"         $root
+    "enabled"      true
+    "name"         "<pvc-name>"
+    "component"    "<component-label>"
+    "storageClass" "<storageClass or \"\">"
+    "size"         "<size>"
+  )
+
+Produces a PVC manifest if .enabled is true, empty string otherwise.
+*/}}
+{{- define "tempo-monitor.pvc" -}}
+{{- $root := .root -}}
+{{- if .enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .name }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    app.kubernetes.io/component: {{ .component }}
+    {{- include "tempo-monitor.labels" $root | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: {{ .storageClass | default "" | quote }}
+  resources:
+    requests:
+      storage: {{ .size }}
+{{- end }}
+{{- end }}

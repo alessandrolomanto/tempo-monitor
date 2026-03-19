@@ -3,25 +3,6 @@
 {{- if or (eq $profile "monitoring") (eq $profile "full") }}
 
 {{- /* helper to build a PVC spec */ -}}
-{{- define "tempo-monitor.pvc" -}}
-{{- if .enabled }}
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: {{ .name }}
-  namespace: {{ $root.Release.Namespace }}
-  labels:
-    app.kubernetes.io/component: {{ .component }}
-    {{- include "tempo-monitor.labels" $root | nindent 4 }}
-spec:
-  accessModes: ["ReadWriteOnce"]
-  storageClassName: {{ .storageClass | default "" | quote }}
-  resources:
-    requests:
-      storage: {{ .size }}
----
-{{- end }}
-{{- end }}
 
 # ── Prometheus ──────────────────────────────────────────────
 {{- if .Values.monitoring.persistence.prometheus.enabled }}
