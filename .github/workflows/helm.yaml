@@ -108,13 +108,13 @@ jobs:
 
       - id: meta
         run: |
-          VERSION=$(helm show chart ./helm/Chart.yaml | grep '^version:' | awk '{print $2}' | xargs)
+          VERSION=$(helm show chart ./helm/ | grep '^version:' | awk '{print $2}' | xargs)
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
           echo "basename=tempo-monitor-${VERSION}.tgz" >> $GITHUB_OUTPUT
 
       - name: Helm package
         run: |
-          helm package ./helm/Chart.yaml --destination /tmp/helm-charts/
+          helm package ./helm/ --destination /tmp/helm-charts/
           ls -la /tmp/helm-charts/
 
       - name: Upload chart artifact
