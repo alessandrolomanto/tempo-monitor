@@ -1,4 +1,5 @@
 http:
+  # ── Routers ─────────────────────────────────────────────────────────
   routers:
     rpc:
       entryPoints: [rpc]
@@ -18,6 +19,7 @@ http:
       service: rpc
       priority: 1
 
+  # ── Services ────────────────────────────────────────────────────────
   services:
     rpc:
       loadBalancer:
@@ -25,7 +27,6 @@ http:
           path: /health
           interval: 10s
           timeout:  5s
-          # Traefik follows redirects; both health sidecars return plain 200/503
           followRedirects: true
           headers:
             Host: ""
