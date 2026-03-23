@@ -1,0 +1,51 @@
+{{- $root := . }}
+{{- $profile := .Values.profile }}
+{{- if or (eq $profile "consensus") (eq $profile "full") }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "tempo-monitor.fullname" $root }}-traefik-dynamic
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    app.kubernetes.io/component: traefik
+    {{- include "tempo-monitor.labels" $root | nindent 4 }}
+data:
+  dynamic.yml: |
+    http:
+      routers:
+        rpc:
+          entryPoints: [rpc]
+          rule: "Host(`rpc.tempo.local`)"
+          service: rpc
+          priority: 20
+
+        faucet:
+          entryPoints: [rpc]
+          rule: "Host(`faucet.tempo.local`)"
+          service: faucet
+          priority: 20
+
+        catchall:
+          entryPoints: [rpc]
+          rule: "PathPrefix(`/`)"
+          service: rpc
+          priority: 1
+
+      services:
+        rpc:
+          loadBalancer:
+            healthCheck:
+              path: /health
+              interval: 10s
+              timeout: 5s
+              followRedirects: true
+            servers:
+              {{- range $i, $rpc := until (int .Values.rpc.count) }}
+              - url: "http://{{ include "tempo-monitor.fullname" $root }}-rpc-{{ $i }}:{{ $root.Values.tempo.rpc.port }}/"
+              {{- end }}
+
+        faucet:
+          loadBalancer:
+            servers:
+              - url: "http://{{ include "tempo-monitor.fullname" $root }}-faucet:{{ $root.Values.tempo.rpc.port }}/"
+{{- end }}{{/* end profile guard */}}

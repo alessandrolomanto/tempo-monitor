@@ -1,0 +1,288 @@
+# 
+# tempo-monitor Helm Chart
+# https://github.com/alessandrolomanto/tempo-monitor
+#
+# Profile: selects which components are deployed.
+#   consensus        Tempo consensus network only (validators + RPC + Traefik)
+#   monitoring       Monitoring stack only (Prometheus, Grafana, Loki, Tempo, Pyroscope, Alloy)
+#   full             consensus + monitoring combined
+# 
+
+#  Deployment profile 
+profile: full
+
+#  Global defaults 
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+commonAnnotations: {}
+
+#  Tempo node settings 
+tempo:
+  image: ghcr.io/tempoxyz/tempo:1.4.1
+  pullPolicy: IfNotPresent
+
+  rpc:
+    port: 8545
+
+  ws:
+    port: 8546
+
+  execution:
+    metricsPort: 9001
+
+  consensus:
+    metricsPort: 8001
+    listenPort: 8000
+
+  rustLog: debug
+
+  otlp:
+    enabled: true
+    endpoint: "http://tempo-monitor-alloy:4318"
+    logFilter: "info,reth=debug"
+    traceSampleRatio: "1.0"
+
+  feeRecipient: "0x0000000000000000000000000000000000000000"
+
+  # Provide genesis.json via existing Secret (name must contain key "genesis.json")
+  genesisExistingSecret: ""
+  # OR set genesis as base64-encoded inline string:
+  genesis: ""
+
+  signingKeyExistingSecret: ""
+  signingShareExistingSecret: ""
+
+#  Validator nodes 
+validators:
+  count: 4
+
+  # Ordered list of hostnames for each validator's headless service.
+  # MUST have exactly `count` entries.
+  hosts:
+    - "tempo-monitor-validator-0"
+    - "tempo-monitor-validator-1"
+    - "tempo-monitor-validator-2"
+    - "tempo-monitor-validator-3"
+
+  # Per-validator signing keys (set secret name or inline key data).
+  # Example: set per-validator key:
+  #   signingKeys:
+  #     0: |
+  #       -----BEGIN EC PRIVATE KEY-----
+  #       ...
+  signingKeys: {}
+  signingShares: {}
+
+  persistence:
+    enabled: true
+    storageClass: ""
+    dataSize: 20Gi
+    consensusDataSize: 10Gi
+
+  nodeSelector: {}
+  tolerations: []
+
+  resources:
+    requests:
+      cpu: 500m
+      memory: 2Gi
+    limits:
+      memory: 8Gi
+
+#  RPC follower nodes 
+rpc:
+  count: 2
+
+  persistence:
+    enabled: true
+    storageClass: ""
+    dataSize: 50Gi
+
+  nodeSelector: {}
+  tolerations: []
+
+  resources:
+    requests:
+      cpu: 500m
+      memory: 2Gi
+    limits:
+      memory: 8Gi
+
+  healthCheck:
+    # Max age of local block before marking stale (seconds)
+    maxAgeSecs: 30
+    # Max drift from leader block timestamp before marking lagging (seconds)
+    maxDriftSecs: 30
+    # Leader host for drift check (empty = first validator host)
+    leaderHost: ""
+
+#  Faucet node 
+faucet:
+  enabled: true
+
+  persistence:
+    enabled: true
+    storageClass: ""
+    dataSize: 20Gi
+
+  nodeSelector: {}
+  tolerations: []
+
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      memory: 2Gi
+
+  # Built-in faucet private key (Hex-encoded ECDSA private key).
+  # DO NOT use this default in production  set via existingSecret.
+  privateKey: "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+
+  amount: "1000000000000000"
+  tip20Contract: "0x20c0000000000000000000000000000000000000"
+
+  existingSecret: ""
+
+#  Traefik ingress / load-balancer 
+traefik:
+  enabled: true
+  serviceType: LoadBalancer
+
+  rpcPort: 80
+  dashboardPort: 8080
+  metricsPort: 8082
+
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    hosts: []
+    tls: []
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+
+#  Monitoring stack 
+monitoring:
+  enabled: true
+
+  persistence:
+    prometheus:
+      enabled: true
+      storageClass: ""
+      size: 10Gi
+    grafana:
+      enabled: true
+      storageClass: ""
+      size: 1Gi
+    loki:
+      enabled: true
+      storageClass: ""
+      size: 10Gi
+    tempo:
+      enabled: true
+      storageClass: ""
+      size: 10Gi
+    pyroscope:
+      enabled: true
+      storageClass: ""
+      size: 5Gi
+
+  grafana:
+    adminUser: admin
+    adminPassword: admin
+    existingSecret: ""
+    anonymous:
+      enabled: true
+      orgRole: Viewer
+    serviceType: ClusterIP
+
+  prometheus:
+    scrapeInterval: 15s
+    evaluationInterval: 15s
+    retention: 30d
+
+  alloy:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        memory: 512Mi
+
+  pyroscope:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        memory: 1Gi
+
+  loki:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        memory: 512Mi
+
+  tempo:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        memory: 1Gi
+
+  nodeSelector: {}
+  tolerations: []
+
+#  MPP demo API 
+mpp:
+  enabled: false
+  image: ""
+  feePayerKey: "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+  existingSecret: ""
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+
+  service:
+    type: ClusterIP
+    port: 3030
+
+  nodeSelector: {}
+  tolerations: []
+
+#  Security contexts 
+podSecurityContext:
+  runAsNonRoot: false
+  fsGroup: 0
+
+securityContext: {}
+
+#  Networking 
+networkPolicy:
+  enabled: false
+
+#  RBAC 
+rbac:
+  create: true
+
+serviceAccounts:
+  validators: ""
+  rpc: ""
+  traefik: ""
+  monitoring: ""
+  alloy: ""
+  mpp: ""
