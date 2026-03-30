@@ -1,6 +1,6 @@
 # ── Shared validator defaults ────────────────────────────────────────
 x-validator: &validator-defaults
-  image: ${DOCKER_IMAGE:-ghcr.io/tempoxyz/tempo:1.4.3}
+  image: ${DOCKER_IMAGE:-ghcr.io/tempoxyz/tempo:1.5.1}
   init: true
   restart: unless-stopped
   profiles: [consensus]
@@ -68,7 +68,7 @@ x-validator: &validator-defaults
 
 # ── Shared RPC follower defaults ─────────────────────────────────────
 x-rpc: &rpc-defaults
-  image: ${DOCKER_IMAGE:-ghcr.io/tempoxyz/tempo:1.4.3}
+  image: ${DOCKER_IMAGE:-ghcr.io/tempoxyz/tempo:1.5.1}
   init: true
   restart: unless-stopped
   profiles: [consensus]
