@@ -1,0 +1,81 @@
+{{- $root := . }}
+{{- $profile := .Values.profile }}
+{{- if or (eq $profile "consensus") (eq $profile "full") }}
+{{- $rpcCount := int .Values.rpc.count }}
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "tempo-monitor.fullname" $root }}-traefik
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    app.kubernetes.io/component: traefik
+    app.kubernetes.io/name: traefik
+    {{- include "tempo-monitor.labels" $root | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: traefik
+      app.kubernetes.io/name: traefik
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: traefik
+        app.kubernetes.io/name: traefik
+      {{- include "tempo-monitor.labels" $root | nindent 8 }}
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: traefik
+          image: traefik:v3.3
+          imagePullPolicy: IfNotPresent
+          args:
+            - --configfile=/etc/traefik/traefik.yml
+            - --providers.file.filename=/etc/traefik/dynamic.yml
+            - --providers.file.watch=true
+            - --entrypoints.rpc.address=:{{ $.Values.traefik.rpcPort }}
+            - --log.level=DEBUG
+            - --api.insecure=true
+            - --metrics.prometheus=true
+            - --metrics.prometheus.entryPoint=metrics
+            - --metrics.prometheus.addEntryPointsLabels=true
+            - --metrics.prometheus.addServicesLabels=true
+            - --metrics.prometheus.addRoutersLabels=true
+            - --entrypoints.metrics.address=:{{ $.Values.traefik.metricsPort }}
+            - --tracing.otlp.http.endpoint={{ $.Values.tempo.otlp.endpoint }}/v1/traces
+            - --tracing.serviceName=traefik
+            - --tracing.sampleRate=1.0
+          {{- with $.Values.traefik.resources }}
+          resources: {{ toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $.Values.securityContext }}
+          securityContext: {{ toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - name: rpc
+              containerPort: {{ $.Values.traefik.rpcPort }}
+              protocol: TCP
+            - name: dashboard
+              containerPort: {{ $.Values.traefik.dashboardPort }}
+              protocol: TCP
+            - name: metrics
+              containerPort: {{ $.Values.traefik.metricsPort }}
+              protocol: TCP
+          volumeMounts:
+            - name: traefik-yml
+              mountPath: /etc/traefik/traefik.yml
+              subPath: traefik.yml
+              readOnly: true
+            - name: traefik-dynamic
+              mountPath: /etc/traefik/dynamic.yml
+              subPath: dynamic.yml
+              readOnly: true
+      volumes:
+        - name: traefik-yml
+          configMap:
+            name: {{ include "tempo-monitor.fullname" $root }}-traefik-yml
+        - name: traefik-dynamic
+          configMap:
+            name: {{ include "tempo-monitor.fullname" $root }}-traefik-dynamic
+{{- end }}{{/* end profile guard */}}

@@ -1,0 +1,20 @@
+{{- $root := . }}
+{{- $profile := .Values.profile }}
+{{- if or (eq $profile "consensus") (eq $profile "full") }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "tempo-monitor.fullname" $root }}-traefik-yml
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    app.kubernetes.io/component: traefik
+    {{- include "tempo-monitor.labels" $root | nindent 4 }}
+data:
+  traefik.yml: |
+    api:
+      insecure: true
+
+    metrics:
+      prometheus:
+        entryPoint: metrics
+{{- end }}{{/* end profile guard */}}

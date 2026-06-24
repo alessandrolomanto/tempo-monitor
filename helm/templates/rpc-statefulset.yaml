@@ -1,0 +1,161 @@
+{{- $root := . }}
+{{- $profile := .Values.profile }}
+{{- if or (eq $profile "consensus") (eq $profile "full") }}
+
+{{- $tempoImage := include "tempo-monitor.image" . }}
+{{- $leaderHost := index .Values.validators.hosts 0 }}
+
+{{- range $i, $rpc := until (int .Values.rpc.count) }}
+{{- $name := printf "rpc-%d" $i }}
+{{- $validatorHost := index $.Values.validators.hosts $i }}
+{{- $healthMaxAge := $.Values.rpc.healthCheck.maxAgeSecs }}
+{{- $healthMaxDrift := $.Values.rpc.healthCheck.maxDriftSecs }}
+{{- $healthLeaderHost := $.Values.rpc.healthCheck.leaderHost | default $leaderHost }}
+{{- $rpcPort := $.Values.tempo.rpc.port }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "tempo-monitor.fullname" $ }}-{{ $name }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    app.kubernetes.io/component: rpc
+    app.kubernetes.io/name: {{ $name }}
+    {{- include "tempo-monitor.labels" $ | nindent 4 }}
+spec:
+  serviceName: {{ include "tempo-monitor.fullname" $ }}-{{ $name }}
+  replicas: 1
+  podManagementPolicy: Parallel
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: rpc
+      app.kubernetes.io/name: {{ $name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: rpc
+        app.kubernetes.io/name: {{ $name }}
+        pyroscope.agent.enabled: "true"
+        pyroscope.service: {{ $name }}
+        pyroscope.exporter: eBPF
+      {{- include "tempo-monitor.labels" $ | nindent 8 }}
+    spec:
+      {{- with $.Values.rpc.nodeSelector }}
+      nodeSelector: {{ toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $.Values.rpc.tolerations }}
+      tolerations: {{ toYaml . | nindent 8 }}
+      {{- end }}
+      terminationGracePeriodSeconds: 30
+      containers:
+        #  Tempo RPC follower 
+        - name: tempo
+          image: {{ $tempoImage }}
+          imagePullPolicy: {{ $.Values.tempo.pullPolicy }}
+          ports:
+            - name: http-rpc
+              containerPort: {{ $rpcPort }}
+            - name: metrics-exec
+              containerPort: {{ $.Values.tempo.execution.metricsPort }}
+          env:
+            - name: RUST_LOG
+              value: {{ $.Values.tempo.rustLog | quote }}
+          args:
+            - node
+            - --chain
+            - /tmp/genesis.json
+            - --datadir
+            - /tmp/data
+            - --follow
+            - {{ printf "ws://%s:%d" $validatorHost $.Values.tempo.ws.port | quote }}
+            - --http
+            - --http.addr
+            - "0.0.0.0"
+            - --http.port
+            - {{ printf "%d" $rpcPort | quote }}
+            - --http.api
+            - all
+            - --metrics
+            - {{ printf "0.0.0.0:%d" $.Values.tempo.execution.metricsPort | quote }}
+            {{- if $.Values.tempo.otlp.enabled }}
+            - --logs-otlp={{ $.Values.tempo.otlp.endpoint }}/v1/logs
+            - --logs-otlp.filter={{ $.Values.tempo.otlp.logFilter }}
+            - --tracing-otlp={{ $.Values.tempo.otlp.endpoint }}/v1/traces
+            - --tracing-otlp.filter={{ $.Values.tempo.otlp.logFilter }}
+            - --tracing-otlp.sample-ratio={{ $.Values.tempo.otlp.traceSampleRatio }}
+            {{- end }}
+          {{- with $.Values.rpc.resources }}
+          resources: {{ toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $.Values.securityContext }}
+          securityContext: {{ toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: genesis
+              mountPath: /tmp/genesis.json
+              subPath: genesis.json
+              readOnly: true
+            - name: data
+              mountPath: /tmp/data
+
+        #  Health-check + transparent HTTP proxy sidecar 
+        # GET  /health    timestamp-based health check (no proxy)
+        # *    /*         transparent proxy to local RPC (traffic from Traefik)
+        - name: healthcheck
+          image: python:3.12-slim
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: health
+              containerPort: 8080
+          env:
+            - name: RPC_URL
+              value: {{ printf "http://localhost:%d" $rpcPort | toJson }}
+            - name: LEADER_URL
+              value: {{ printf "http://%s:%d" $healthLeaderHost $rpcPort | toJson }}
+            - name: MAX_AGE_SECS
+              value: {{ $healthMaxAge | toJson }}
+            - name: MAX_DRIFT_SECS
+              value: {{ $healthMaxDrift | toJson }}
+            - name: HEALTH_PORT
+              value: "8080"
+          volumeMounts:
+            - name: healthcheck-script
+              mountPath: /healthcheck.py
+              subPath: healthcheck.py
+              readOnly: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
+          {{- with $.Values.securityContext }}
+          securityContext: {{ toYaml . | nindent 12 }}
+          {{- end }}
+
+      volumes:
+        - name: genesis
+          secret:
+            secretName: {{ include "tempo-monitor.fullname" $ }}-genesis
+        - name: healthcheck-script
+          configMap:
+            name: {{ include "tempo-monitor.fullname" $ }}-healthcheck-script
+  {{- if $.Values.rpc.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: {{ $.Values.rpc.persistence.storageClass | default "" | quote }}
+        resources:
+          requests:
+            storage: {{ $.Values.rpc.persistence.dataSize }}
+  {{- else }}
+        - name: data
+          emptyDir: {}
+  {{- end }}
+{{- end }}
+
+{{- end }}{{/* end profile guard */}}

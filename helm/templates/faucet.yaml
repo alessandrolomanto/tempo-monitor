@@ -1,0 +1,148 @@
+{{- $root := . }}
+{{- $profile := .Values.profile }}
+{{- if or (eq $profile "consensus") (eq $profile "full") }}
+{{- if .Values.faucet.enabled }}
+{{- $leaderHost := index .Values.validators.hosts 0 }}
+
+{{- if and .Values.faucet.persistence.enabled (not .Values.faucet.existingSecret) }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "tempo-monitor.fullname" $root }}-faucet
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    app.kubernetes.io/component: faucet
+    {{- include "tempo-monitor.labels" $root | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: {{ .Values.faucet.persistence.storageClass | default "" | quote }}
+  resources:
+    requests:
+      storage: {{ .Values.faucet.persistence.dataSize }}
+{{- end }}
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "tempo-monitor.fullname" $root }}-faucet
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    app.kubernetes.io/component: faucet
+    {{- include "tempo-monitor.labels" $root | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: faucet
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: faucet
+        pyroscope.agent.enabled: "true"
+        pyroscope.service: faucet
+        pyroscope.exporter: eBPF
+      {{- include "tempo-monitor.labels" $root | nindent 8 }}
+    spec:
+      {{- with .Values.faucet.nodeSelector }}
+      nodeSelector: {{ toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.faucet.tolerations }}
+      tolerations: {{ toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: tempo
+          image: {{ include "tempo-monitor.image" $root }}
+          imagePullPolicy: {{ $root.Values.tempo.pullPolicy }}
+          ports:
+            - name: http-rpc
+              containerPort: {{ $root.Values.tempo.rpc.port }}
+            - name: metrics-exec
+              containerPort: {{ $root.Values.tempo.execution.metricsPort }}
+          env:
+            - name: RUST_LOG
+              value: {{ $root.Values.tempo.rustLog | quote }}
+          args:
+            - node
+            - --chain
+            - /tmp/genesis.json
+            - --datadir
+            - /tmp/data
+            - --follow
+            - {{ printf "ws://%s:%d" $leaderHost $root.Values.tempo.ws.port | quote }}
+            - --http
+            - --http.addr
+            - "0.0.0.0"
+            - --http.port
+            - {{ printf "%d" $root.Values.tempo.rpc.port | quote }}
+            - --http.api
+            - all
+            - --metrics
+            - {{ printf "0.0.0.0:%d" $root.Values.tempo.execution.metricsPort | quote }}
+            - --faucet.enabled
+            {{- if .Values.faucet.existingSecret }}
+            - --faucet.private-key
+            - $(FAUCET_PRIVATE_KEY)
+            {{- else }}
+            - --faucet.private-key
+            - {{ .Values.faucet.privateKey }}
+            {{- end }}
+            - --faucet.amount
+            - {{ .Values.faucet.amount }}
+            - --faucet.address
+            - {{ .Values.faucet.tip20Contract }}
+            - --faucet.node-address
+            - {{ printf "http://%s:%d" $leaderHost $root.Values.tempo.rpc.port | quote }}
+            {{- if $root.Values.tempo.otlp.enabled }}
+            - --logs-otlp={{ $root.Values.tempo.otlp.endpoint }}/v1/logs
+            - --logs-otlp.filter={{ $root.Values.tempo.otlp.logFilter }}
+            - --tracing-otlp={{ $root.Values.tempo.otlp.endpoint }}/v1/traces
+            - --tracing-otlp.filter={{ $root.Values.tempo.otlp.logFilter }}
+            - --tracing-otlp.sample-ratio={{ $root.Values.tempo.otlp.traceSampleRatio }}
+            {{- end }}
+          {{- with .Values.faucet.resources }}
+          resources: {{ toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.securityContext }}
+          securityContext: {{ toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: genesis
+              mountPath: /tmp/genesis.json
+              subPath: genesis.json
+              readOnly: true
+            - name: data
+              mountPath: /tmp/data
+      volumes:
+        - name: genesis
+          secret:
+            secretName: {{ include "tempo-monitor.fullname" $root }}-genesis
+        {{- if .Values.faucet.persistence.enabled }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "tempo-monitor.fullname" $root }}-faucet
+        {{- else }}
+        - name: data
+          emptyDir: {}
+        {{- end }}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "tempo-monitor.fullname" $root }}-faucet
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    app.kubernetes.io/component: faucet
+    {{- include "tempo-monitor.labels" $root | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: http-rpc
+      port: {{ $root.Values.tempo.rpc.port }}
+      targetPort: http-rpc
+  selector:
+    app.kubernetes.io/component: faucet
+{{- end }}
+{{- end }}{{/* end profile guard */}}

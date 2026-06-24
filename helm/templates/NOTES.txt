@@ -1,0 +1,21 @@
+Tempo Monitor devnet installed.
+
+Profile "{{ .Values.profile }}" deployed.
+
+JSON-RPC:       http://{{ include "tempo-monitor.fullname" . }}-traefik.{{ .Release.Namespace }}.svc.cluster.local
+                 or http://traefik.{{ .Release.Namespace }}.svc.cluster.local via Ingress
+Prometheus:     http://{{ include "tempo-monitor.fullname" . }}-prometheus.{{ .Release.Namespace }}.svc.cluster.local:9090
+Grafana:        http://{{ include "tempo-monitor.fullname" . }}-grafana.{{ .Release.Namespace }}.svc.cluster.local:3000
+Grafana Tempo:  http://{{ include "tempo-monitor.fullname" . }}-grafana-tempo.{{ .Release.Namespace }}.svc.cluster.local:3200
+Loki:           http://{{ include "tempo-monitor.fullname" . }}-loki.{{ .Release.Namespace }}.svc.cluster.local:3100
+Pyroscope:      http://{{ include "tempo-monitor.fullname" . }}-pyroscope.{{ .Release.Namespace }}.svc.cluster.local:4040
+Alloy:          http://{{ include "tempo-monitor.fullname" . }}-alloy.{{ .Release.Namespace }}.svc.cluster.local:12345
+
+Validating nodes:    {{ .Values.validators.count }}
+RPC followers:       {{ .Values.rpc.count }}
+Monitoring:          {{ .Values.monitoring.enabled }}
+
+To forward ports locally:
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "tempo-monitor.fullname" . }}-traefik 80:80
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "tempo-monitor.fullname" . }}-grafana 3000:3000
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "tempo-monitor.fullname" . }}-prometheus 9090:9090

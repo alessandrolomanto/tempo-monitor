@@ -1,0 +1,72 @@
+{{- $root := . }}
+{{- $profile := .Values.profile }}
+{{- if or (eq $profile "consensus") (eq $profile "full") }}
+{{- range $i, $val := until (int .Values.validators.count) }}
+{{- $name := printf "validator-%d" $i }}
+---
+# Headless service for validator discovery
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "tempo-monitor.fullname" $root }}-{{ $name }}-headless
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    app.kubernetes.io/component: validator
+    app.kubernetes.io/name: {{ $name }}
+    {{- include "tempo-monitor.labels" $root | nindent 4 }}
+spec:
+  clusterIP: None
+  ports:
+    - name: http-rpc
+      port: {{ $root.Values.tempo.rpc.port }}
+      targetPort: http-rpc
+    - name: ws-rpc
+      port: {{ $root.Values.tempo.ws.port }}
+      targetPort: ws-rpc
+    - name: metrics-exec
+      port: {{ $root.Values.tempo.execution.metricsPort }}
+      targetPort: metrics-exec
+    - name: metrics-cons
+      port: {{ $root.Values.tempo.consensus.metricsPort }}
+      targetPort: metrics-cons
+    - name: consensus
+      port: {{ $root.Values.tempo.consensus.listenPort }}
+      targetPort: consensus
+  selector:
+    app.kubernetes.io/component: validator
+    app.kubernetes.io/name: {{ $name }}
+
+---
+# ClusterIP service for validator RPC access
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "tempo-monitor.fullname" $root }}-{{ $name }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    app.kubernetes.io/component: validator
+    app.kubernetes.io/name: {{ $name }}
+    {{- include "tempo-monitor.labels" $root | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: http-rpc
+      port: {{ $root.Values.tempo.rpc.port }}
+      targetPort: http-rpc
+    - name: ws-rpc
+      port: {{ $root.Values.tempo.ws.port }}
+      targetPort: ws-rpc
+    - name: metrics-exec
+      port: {{ $root.Values.tempo.execution.metricsPort }}
+      targetPort: metrics-exec
+    - name: metrics-cons
+      port: {{ $root.Values.tempo.consensus.metricsPort }}
+      targetPort: metrics-cons
+    - name: consensus
+      port: {{ $root.Values.tempo.consensus.listenPort }}
+      targetPort: consensus
+  selector:
+    app.kubernetes.io/component: validator
+    app.kubernetes.io/name: {{ $name }}
+{{- end }}
+{{- end }}{{/* end profile guard */}}

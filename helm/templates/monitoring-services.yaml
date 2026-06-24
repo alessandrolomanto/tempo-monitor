@@ -1,0 +1,101 @@
+{{- $root := . }}
+{{- $profile := .Values.profile }}
+{{- if or (eq $profile "monitoring") (eq $profile "full") }}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "tempo-monitor.fullname" $root }}-prometheus
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    app.kubernetes.io/component: prometheus
+    {{- include "tempo-monitor.labels" $root | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 9090
+      targetPort: 9090
+  selector:
+    app.kubernetes.io/component: prometheus
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "tempo-monitor.fullname" $root }}-alloy
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    app.kubernetes.io/component: alloy
+    {{- include "tempo-monitor.labels" $root | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 12345
+      targetPort: 12345
+  selector:
+    app.kubernetes.io/component: alloy
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "tempo-monitor.fullname" $root }}-grafana-tempo
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    app.kubernetes.io/component: grafana-tempo
+    {{- include "tempo-monitor.labels" $root | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: 4317
+    - name: otlp-http
+      port: 4318
+      targetPort: 4318
+    - name: tempo-http
+      port: 3200
+      targetPort: 3200
+  selector:
+    app.kubernetes.io/component: grafana-tempo
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "tempo-monitor.fullname" $root }}-loki
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    app.kubernetes.io/component: loki
+    {{- include "tempo-monitor.labels" $root | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 3100
+      targetPort: 3100
+  selector:
+    app.kubernetes.io/component: loki
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "tempo-monitor.fullname" $root }}-pyroscope
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    app.kubernetes.io/component: pyroscope
+    {{- include "tempo-monitor.labels" $root | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 4040
+      targetPort: 4040
+  selector:
+    app.kubernetes.io/component: pyroscope
+
+{{- end }}{{/* end profile guard */}}

@@ -1,0 +1,103 @@
+{{- $root := . }}
+{{- $profile := .Values.profile }}
+{{- if or (eq $profile "monitoring") (eq $profile "full") }}
+{{- if .Values.monitoring.persistence.grafana.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "tempo-monitor.fullname" $root }}-grafana
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    app.kubernetes.io/component: grafana
+    {{- include "tempo-monitor.labels" $root | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: {{ .Values.monitoring.persistence.grafana.storageClass | default "" | quote }}
+  resources:
+    requests:
+      storage: {{ .Values.monitoring.persistence.grafana.size }}
+{{- end }}
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "tempo-monitor.fullname" $root }}-grafana
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    app.kubernetes.io/component: grafana
+    {{- include "tempo-monitor.labels" $root | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: grafana
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: grafana
+      {{- include "tempo-monitor.labels" $root | nindent 8 }}
+    spec:
+      containers:
+        - name: grafana
+          image: grafana/grafana:11.5.2
+          ports:
+            - name: http
+              containerPort: 3000
+          env:
+            - name: GF_SECURITY_ADMIN_USER
+              value: {{ .Values.monitoring.grafana.adminUser | quote }}
+            {{- if .Values.monitoring.grafana.existingSecret }}
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.monitoring.grafana.existingSecret }}
+                  key: password
+            {{- else }}
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              value: {{ .Values.monitoring.grafana.adminPassword | default "admin" | quote }}
+            {{- end }}
+            - name: GF_AUTH_ANONYMOUS_ENABLED
+              value: {{ .Values.monitoring.grafana.anonymous.enabled | quote }}
+            - name: GF_AUTH_ANONYMOUS_ORG_ROLE
+              value: {{ .Values.monitoring.grafana.anonymous.orgRole | quote }}
+          volumeMounts:
+            - name: provisioning
+              mountPath: /etc/grafana/provisioning
+              readOnly: true
+            {{- if .Values.monitoring.persistence.grafana.enabled }}
+            - name: data
+              mountPath: /var/lib/grafana
+            {{- end }}
+      volumes:
+        - name: provisioning
+          configMap:
+            name: {{ include "tempo-monitor.fullname" $root }}-grafana-provisioning
+        {{- if .Values.monitoring.persistence.grafana.enabled }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "tempo-monitor.fullname" $root }}-grafana
+        {{- else }}
+        - name: data
+          emptyDir: {}
+        {{- end }}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "tempo-monitor.fullname" $root }}-grafana
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    app.kubernetes.io/component: grafana
+    {{- include "tempo-monitor.labels" $root | nindent 4 }}
+spec:
+  type: {{ .Values.monitoring.grafana.serviceType | default "ClusterIP" }}
+  ports:
+    - name: http
+      port: 3000
+      targetPort: 3000
+  selector:
+    app.kubernetes.io/component: grafana
+{{- end }}{{/* end profile guard */}}

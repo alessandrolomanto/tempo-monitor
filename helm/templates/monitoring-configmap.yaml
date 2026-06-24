@@ -1,0 +1,181 @@
+{{- $root := . }}
+{{- $profile := .Values.profile }}
+{{- if or (eq $profile "monitoring") (eq $profile "full") }}
+# Prometheus configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "tempo-monitor.fullname" $root }}-prometheus
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    app.kubernetes.io/component: prometheus
+    {{- include "tempo-monitor.labels" $root | nindent 4 }}
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: {{ .Values.monitoring.prometheus.scrapeInterval }}
+      evaluation_interval: {{ .Values.monitoring.prometheus.evaluationInterval }}
+
+    scrape_configs:
+      - job_name: "prometheus"
+        static_configs:
+          - targets: ["localhost:9090"]
+
+      - job_name: "tempo-validators"
+        static_configs:
+          {{- range $i, $val := until (int .Values.validators.count) }}
+          - targets: ["{{ include "tempo-monitor.fullname" $root }}-validator-{{ $val }}:{{ $root.Values.tempo.execution.metricsPort }}"]
+            labels:
+              instance: "validator-{{ $val }}"
+          - targets: ["{{ include "tempo-monitor.fullname" $root }}-validator-{{ $val }}:{{ $root.Values.tempo.consensus.metricsPort }}"]
+            labels:
+              instance: "validator-{{ $val }}"
+              layer: "consensus"
+          {{- end }}
+
+      - job_name: "tempo-rpc"
+        static_configs:
+          {{- range $i, $rpc := until (int .Values.rpc.count) }}
+          - targets: ["{{ include "tempo-monitor.fullname" $root }}-rpc-{{ $rpc }}:{{ $root.Values.tempo.execution.metricsPort }}"]
+            labels:
+              instance: "rpc-{{ $rpc }}"
+          {{- end }}
+
+      - job_name: "tempo-faucet"
+        static_configs:
+          - targets: ["{{ include "tempo-monitor.fullname" $root }}-faucet:{{ $root.Values.tempo.execution.metricsPort }}"]
+
+      - job_name: "traefik"
+        static_configs:
+          - targets: ["{{ include "tempo-monitor.fullname" $root }}-traefik:{{ $root.Values.traefik.metricsPort }}"]
+
+---
+# Grafana Alloy configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "tempo-monitor.fullname" $root }}-alloy
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    app.kubernetes.io/component: alloy
+    {{- include "tempo-monitor.labels" $root | nindent 4 }}
+data:
+  config.alloy: |
+    otelcol.receiver.otlp "default" {
+      grpc { endpoint = "0.0.0.0:4317" }
+      http { endpoint = "0.0.0.0:4318" }
+      output {
+        logs   = [otelcol.exporter.loki.default.input]
+        traces = [otelcol.exporter.otlp.tempo.input]
+      }
+    }
+
+    prometheus.scrape "execution" {
+      targets = [
+        {{- range $i, $val := until (int .Values.validators.count) }}
+        {__address__ = "{{ include "tempo-monitor.fullname" $root }}-validator-{{ $val }}:{{ $root.Values.tempo.execution.metricsPort }}", instance = "validator-{{ $val }}"},
+        {{- end }}
+        {{- range $i, $rpc := until (int .Values.rpc.count) }}
+        {__address__ = "{{ include "tempo-monitor.fullname" $root }}-rpc-{{ $rpc }}:{{ $root.Values.tempo.execution.metricsPort }}", instance = "rpc-{{ $rpc }}"},
+        {{- end }}
+        {__address__ = "{{ include "tempo-monitor.fullname" $root }}-faucet:{{ $root.Values.tempo.execution.metricsPort }}", instance = "faucet"},
+      ]
+      forward_to      = [prometheus.remote_write.default.receiver]
+      scrape_interval = "10s"
+      job_name        = "tempo-execution"
+    }
+
+    prometheus.scrape "consensus" {
+      targets = [
+        {{- range $i, $val := until (int .Values.validators.count) }}
+        {__address__ = "{{ include "tempo-monitor.fullname" $root }}-validator-{{ $val }}:{{ $root.Values.tempo.consensus.metricsPort }}", instance = "validator-{{ $val }}"},
+        {{- end }}
+      ]
+      forward_to      = [prometheus.remote_write.default.receiver]
+      scrape_interval = "15s"
+      job_name        = "tempo-consensus"
+    }
+
+    prometheus.scrape "traefik" {
+      targets = [
+        {__address__ = "{{ include "tempo-monitor.fullname" $root }}-traefik:{{ $root.Values.traefik.metricsPort }}", instance = "traefik"},
+      ]
+      forward_to      = [prometheus.remote_write.default.receiver]
+      scrape_interval = "15s"
+      job_name        = "traefik"
+    }
+
+    prometheus.remote_write "default" {
+      endpoint { url = "http://{{ include "tempo-monitor.fullname" $root }}-prometheus:9090/api/v1/write" }
+    }
+
+    otelcol.exporter.loki "default" {
+      forward_to = [loki.write.default.receiver]
+    }
+
+    loki.write "default" {
+      endpoint { url = "http://{{ include "tempo-monitor.fullname" $root }}-loki:3100/loki/api/v1/push" }
+    }
+
+    otelcol.exporter.otlp "tempo" {
+      client {
+        endpoint = "{{ include "tempo-monitor.fullname" $root }}-grafana-tempo:4317"
+        tls { insecure = true }
+      }
+    }
+
+    pyroscope.scrape "heap" {
+      targets = [
+        {{- range $i, $val := until (int .Values.validators.count) }}
+        {__address__ = "{{ include "tempo-monitor.fullname" $root }}-validator-{{ $val }}:{{ $root.Values.tempo.execution.metricsPort }}", service_name = "validator-{{ $val }}"},
+        {{- end }}
+        {{- range $i, $rpc := until (int .Values.rpc.count) }}
+        {__address__ = "{{ include "tempo-monitor.fullname" $root }}-rpc-{{ $rpc }}:{{ $root.Values.tempo.execution.metricsPort }}", service_name = "rpc-{{ $rpc }}"},
+        {{- end }}
+        {__address__ = "{{ include "tempo-monitor.fullname" $root }}-faucet:{{ $root.Values.tempo.execution.metricsPort }}", service_name = "faucet"},
+      ]
+      forward_to      = [pyroscope.write.default.receiver]
+      scrape_interval = "15s"
+      profiling_config {
+        profile.memory { enabled = true, path = "/debug/pprof/heap", delta = false }
+        profile.process_cpu { enabled = false }
+        profile.goroutine   { enabled = false }
+        profile.block        { enabled = false }
+        profile.mutex        { enabled = false }
+        profile.fgprof       { enabled = false }
+      }
+    }
+
+    pyroscope.write "default" {
+      endpoint { url = "http://{{ include "tempo-monitor.fullname" $root }}-pyroscope:4040" }
+    }
+
+    discovery.docker "containers" {
+      host = "unix:///var/run/docker.sock"
+    }
+
+    discovery.relabel "tempo_nodes" {
+      targets = discovery.docker.containers.targets
+      rule {
+        source_labels = ["__meta_docker_container_label_pyroscope_agent_enabled"]
+        regex         = "true"
+        action        = "keep"
+      }
+      rule {
+        source_labels = ["__meta_docker_container_label_pyroscope_service"]
+        target_label  = "service_name"
+      }
+    }
+
+    discovery.process "tempo_nodes" {
+      join = discovery.relabel.tempo_nodes.output
+    }
+
+    pyroscope.ebpf "tempo_nodes" {
+      targets          = discovery.process.tempo_nodes.targets
+      forward_to       = [pyroscope.write.default.receiver]
+      demangle         = "full"
+      collect_interval = "15s"
+      sample_rate      = 97
+    }
+{{- end }}{{/* end profile guard */}}

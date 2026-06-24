@@ -1,0 +1,56 @@
+{{- $root := . }}
+{{- $profile := .Values.profile }}
+{{- if or (eq $profile "consensus") (eq $profile "full") }}
+{{- range $i, $rpc := until (int .Values.rpc.count) }}
+{{- $name := printf "rpc-%d" $i }}
+{{- $leaderHost := index $.Values.validators.hosts 0 }}
+{{- $healthCheck := $.Values.rpc.healthCheck }}
+---
+# Internal ClusterIP for RPC follower
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "tempo-monitor.fullname" $root }}-{{ $name }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    app.kubernetes.io/component: rpc
+    app.kubernetes.io/name: {{ $name }}
+    {{- include "tempo-monitor.labels" $root | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: http-rpc
+      port: {{ $root.Values.tempo.rpc.port }}
+      targetPort: http-rpc
+    - name: metrics-exec
+      port: {{ $root.Values.tempo.execution.metricsPort }}
+      targetPort: metrics-exec
+  selector:
+    app.kubernetes.io/component: rpc
+    app.kubernetes.io/name: {{ $name }}
+
+---
+# Health-check sidecar for this RPC node.
+# Exposes GET /health  200 if synced, 503 if lagging.
+# Also acts as a transparent HTTP proxy for all other requests so
+# Traefik can point its backend at this sidecar.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "tempo-monitor.fullname" $root }}-{{ $name }}-health
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    app.kubernetes.io/component: rpc-health
+    app.kubernetes.io/name: {{ $name }}-health
+    {{- include "tempo-monitor.labels" $root | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: health
+      port: 8080
+      targetPort: 8080
+  selector:
+    app.kubernetes.io/component: rpc
+    app.kubernetes.io/name: {{ $name }}
+{{- end }}
+{{- end }}{{/* end profile guard */}}
